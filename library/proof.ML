@@ -675,6 +675,19 @@ val RULE_CMD = let open Parse
 
 (* HAVE *)
 
+fun elim_conjs ctxt =
+  let fun elim thm =
+      case Thm.prop_of thm
+        of \<^Const>\<open>Pure.conjunction\<close> $ _ $ _ =>
+            elim (MP ctxt @{thm Pure.conjunctionD1} thm) @
+            elim (MP ctxt @{thm Pure.conjunctionD2} thm)
+         | \<^Const>\<open>Trueprop\<close> $ (\<^Const>\<open>HOL.conj\<close> $ _ $ _) =>
+            elim (MP ctxt @{thm HOL.conjunct1} thm) @
+            elim (MP ctxt @{thm HOL.conjunct2} thm)
+         | _ => [thm]
+   in elim
+  end
+
 fun HAVE' _ _ (ctxt, []) = (ctxt, [])
   | HAVE' raw_name expr (ctxt, HHF (G,pctxt) :: S) =
       let val SOME (_, jj, _) = IPS_Data.get ctxt
@@ -690,9 +703,12 @@ fun HAVE' _ _ (ctxt, []) = (ctxt, [])
           val goal_term = Syntax.read_prop ctxt expr
           val goal = Goal.init (Thm.cterm_of ctxt goal_term)
           fun CB ctxt' (st',(*pctxt'*) _,S) =
-            let val ((name,[thm]), ctxt'') =
-                        Proof_Context.note_thms "" (name, [([Goal.conclude st'],[])]) ctxt'
-             in (ctxt'', HHF (G, cat_pctxt ([], [(name, [Thm.prop_of thm])]) pctxt) :: S)
+            let val lems = Goal.conclude st'
+                        |> singleton (Proof_Context.export ctxt' ctxt)
+                        |> elim_conjs ctxt
+                val ((name,lems), ctxt'') =
+                        Proof_Context.note_thms "" (name, [(lems,[])]) ctxt
+             in (ctxt'', HHF (G, cat_pctxt ([], [(name, map Thm.prop_of lems)]) pctxt) :: S)
             end
           fun PRT t = BUNDL (pctxt, [t, print_stack [HHF (G,([],[]))]])
        in (ctxt, HHF (goal, ([],[])) :: ENDBLK T_END :: MAGIC (CB, PRT) :: S)

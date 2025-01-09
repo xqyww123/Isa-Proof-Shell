@@ -419,76 +419,14 @@ by (min_script \<open>
 \<close>)
 *)
 
-lemma \<open>rev (rev l) = l\<close>
-proof (cases l)
-ML_val \<open>Proof_Context.dest_cases NONE \<^context> |> @{print} |> hd |> snd
-    |> (fn C => Proof_Context.apply_case C \<^context> )\<close>
-
-lemma comm_append_are_replicate:
-  "xs @ ys = ys @ xs \<Longrightarrow> \<exists>m n zs. concat (replicate m zs) = xs \<and> concat (replicate n zs) = ys"
-  
-proof (induct "length (xs @ ys) + length xs" arbitrary: xs ys rule: less_induct)
-ML_val \<open>Proof_Context.dest_cases NONE \<^context> |> @{print} |> hd |> snd
-    |> (fn C => Proof_Context.apply_case C \<^context> )\<close>
-term ?case
-
-  case less
-  term xs
-  thm less.hyps
-  thm less.prems
-  
-term ?case
-  thm this  
-ML_val \<open>Proof.the_facts (Toplevel.proof_of @{Isar.state})\<close>
-thm less
-
-  consider (1) "length ys < length xs" | (2) "xs = []" | (3) "length xs \<le> length ys \<and> xs \<noteq> []"
-    by linarith
-  then show ?case
-thm less.hyps
-thm less.prems
-  
-
-  proof (cases)
-    case 1
-    then show ?thesis
-      using less.hyps[OF _ less.prems[symmetric]] nat_add_left_cancel_less by auto
-  next
-    case 2
-    then have "concat (replicate 0 ys) = xs \<and> concat (replicate 1 ys) = ys"
-      by simp
-    then show ?thesis
-      by blast
-  next
-    case 3
-    then have "length xs \<le> length ys" and "xs \<noteq> []"
-      by blast+
-    from \<open>length xs \<le> length ys\<close> and  \<open>xs @ ys = ys @ xs\<close>
-    obtain ws where "ys = xs @ ws"
-      by (auto simp: append_eq_append_conv2)
-    from this and \<open>xs \<noteq> []\<close>
-    have "length ws < length ys"
-      by simp
-    from \<open>xs @ ys = ys @ xs\<close>[unfolded \<open>ys = xs @ ws\<close>]
-    have "xs @ ws = ws @ xs"
-      by simp
-    from less.hyps[OF _ this] \<open>length ws < length ys\<close>
-    obtain m n' zs where "concat (replicate m zs) = xs" and  "concat (replicate n' zs) = ws"
-      by auto
-    then have "concat (replicate (m+n') zs) = ys"
-      using \<open>ys = xs @ ws\<close>
-      by (simp add: replicate_add)
-    then show ?thesis
-      using \<open>concat (replicate m zs) = xs\<close> by blast
-  qed
-qed
-
-lemma comm_append_are_replicate':
-  "xs @ ys = ys @ xs \<Longrightarrow> \<exists>m n zs. concat (replicate m zs) = xs \<and> concat (replicate n zs) = ys"
+lemma
+  \<open>A \<Longrightarrow> B \<Longrightarrow> A \<and> B\<close>
   by (min_script \<open>
-    
+  INTRO
+  APPLY auto
+  HAMMER
+  END
 \<close>)
-
 
 
 end
