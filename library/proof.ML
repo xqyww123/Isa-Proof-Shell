@@ -309,7 +309,9 @@ fun INTRO'' F mode (origin as (ctxt, HHF (st0, pctxt) :: L)) =
                               ([],[])) :: S)
                          |> mode = ALL_SUBGOALS ? INTRO'' F mode
                         end
-                    in (ctxt', HHF (st'', pctxt') :: MAGIC (CB,PRT) :: L)
+                    in if Thm.nprems_of st0 > 1
+                    then (ctxt', HHF (st'', pctxt') :: ENDBLK T_NXT :: MAGIC (CB,PRT) :: L)
+                    else (ctxt', HHF (st'', pctxt') :: MAGIC (CB,PRT) :: L)
                    end
               else (ctxt, HHF (st0, pctxt) :: L)
     )
@@ -632,9 +634,22 @@ fun case_synt ctxt toks = case case_synt' (ctxt, toks) of (x, (_, toks)) => (x,t
 
 in
 
-fun INDUCT' (no_simp, (insts, ((arbitrary, taking), opt_rule))) =
-  let val tac = Induct.induct_context_tactic (not no_simp) insts arbitrary taking opt_rule [] 1
-   in CASES' tac
+fun INDUCT' (no_simp, (insts, ((arbitrary, taking), opt_rule))) (ctxt, SK) =
+  let (* val (_, facts, _) = collect_context (print_stack SK)
+      val facts = map (fn (name, _) => (name, Proof_Context.get_thms ctxt name)) facts
+      
+      val dirty_frees = fold (fold (fn NONE => I
+                                     | SOME (_, (X, _)) => Term.add_frees X)) insts []
+                     |> fold (curry (merge (op =))) arbitrary
+      val dirty = member (op =) dirty_frees
+
+      val tamper_facts = map (apsnd (map (` ( Term.exists_subterm (fn Free f => dirty f
+                                                                    | _ => false)
+                                            o Thm.prop_of)))) facts
+      val tamper_facts' = maps (map_filter (fn (true, x) => SOME x | _ => NONE) o snd) tamper_facts *)
+
+      val tac = Induct.induct_context_tactic (not no_simp) insts arbitrary taking opt_rule [] 1
+   in CASES' tac (ctxt, SK)
   end
 
 fun CASE' (no_simp, (insts, opt_rule)) =

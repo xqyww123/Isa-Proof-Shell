@@ -80,19 +80,9 @@ lemma prefix_snoc [simp]: "prefix xs (ys @ [y]) \<longleftrightarrow> xs = ys @ 
 by (min_script \<open>
   CRUSH
   CONSIDER zs where zs: "ys @ [y] = xs @ zs" END
-  HAMMER
+  NEXT
   END
 \<close>)
-proof
-  assume "prefix xs (ys @ [y])"
-  then obtain zs where zs: "ys @ [y] = xs @ zs" ..
-  show "xs = ys @ [y] \<or> prefix xs ys"
-    by (metis append_Nil2 butlast_append butlast_snoc prefixI zs)
-next
-  assume "xs = ys @ [y] \<or> prefix xs ys"
-  then show "prefix xs (ys @ [y])"
-    by auto (metis append.assoc prefix_def) 
-qed
 
 lemma Cons_prefix_Cons [simp]: "prefix (x # xs) (y # ys) = (x = y \<and> prefix xs ys)"
   by (auto simp add: prefix_def)
@@ -213,13 +203,11 @@ qed
 lemma prefix_dropWhile:
   assumes "prefix xs ys"
   shows   "prefix (dropWhile P xs) (dropWhile P ys)"
-proof -
-  from assms obtain zs where ys: "ys = xs @ zs"
-    by (auto simp: prefix_def)
-  have "prefix (dropWhile P xs) (dropWhile P (xs @ zs))"
-    by (induction xs) auto
-  thus ?thesis by (simp add: ys)
-qed
+by (min_script \<open>
+  CONSIDER zs where "ys = xs @ zs" END
+  HAVE "prefix (dropWhile P xs) (dropWhile P (xs @ zs))" END
+  END
+\<close>)
 
 lemma prefix_remdups_adj:
   assumes "prefix xs ys"
@@ -273,6 +261,7 @@ lemma not_prefix_induct [consumes 1, case_names Nil Neq Eq]:
     and r1: "\<And>x xs y ys. x \<noteq> y \<Longrightarrow> P (x#xs) (y#ys)"
     and r2: "\<And>x xs y ys. \<lbrakk> x = y; \<not> prefix xs ys; P xs ys \<rbrakk> \<Longrightarrow> P (x#xs) (y#ys)"
   shows "P ps ls" using np
+
 proof (induct ls arbitrary: ps)
   case Nil
   then show ?case

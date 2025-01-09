@@ -422,9 +422,12 @@ by (min_script \<open>
 lemma
   \<open>A \<Longrightarrow> B \<Longrightarrow> A \<and> B\<close>
   by (min_script \<open>
+  RULE
+  PRINT
   INTRO
-  APPLY auto
-  HAMMER
+  PRINT
+  NEXT
+  PRINT
   END
 \<close>)
 
