@@ -227,17 +227,9 @@ PRINT
 \<close>)
 
 
-definition \<open>TAG X = X\<close>
-
-lemma test_unfold_prem:
-  \<open>TAG P \<Longrightarrow> P\<close>
-  by (min_script \<open>INTRO UNFOLD TAG_def IN assm0 PRINT END\<close>)
-
-
            
 lemma comm_append_are_replicate':
   "xs @ ys = ys @ xs \<Longrightarrow> \<exists>m n zs. concat (replicate m zs) = xs \<and> concat (replicate n zs) = ys"
-   
 by (min_script \<open>
   INDUCT "length (xs @ ys) + length xs" arbitrary: xs ys rule: less_induct
 PRINT

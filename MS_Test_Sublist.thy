@@ -208,6 +208,17 @@ by (min_script \<open>
   HAVE "prefix (dropWhile P xs) (dropWhile P (xs @ zs))" END
   END
 \<close>)
+     
+lemma prefix_remdups_adj':
+  assumes "prefix xs ys"
+  shows   "prefix (remdups_adj xs) (remdups_adj ys)"
+by (min_script \<open>
+  INDUCT "length xs" arbitrary: xs ys rule: less_induct
+  CASE_SPLIT xs
+  NEXT
+    CONSIDER y ys' where "ys = y # ys'" CASE_SPLIT ys END
+  END
+\<close>)
 
 lemma prefix_remdups_adj:
   assumes "prefix xs ys"
@@ -254,14 +265,28 @@ next
     qed
   qed
 qed
+ 
+lemma
+  assumes np: "\<not> prefix ps ls"
+    and base: "\<And>x xs. P (x#xs) []"
+    and r1: "\<And>x xs y ys. x \<noteq> y \<Longrightarrow> P (x#xs) (y#ys)"
+    and r2: "\<And>x xs y ys. \<lbrakk> x = y; \<not> prefix xs ys; P xs ys \<rbrakk> \<Longrightarrow> P (x#xs) (y#ys)"
+  shows "P ps ls" 
+by (min_script \<open>
+  INDUCT ls arbitrary: ps
+  NEXT
+    HAVE "\<not> prefix ps (a # ls)" END
+    CONSIDER x xs where pv: "ps = x # xs" END
+  END
+\<close>)
 
 lemma not_prefix_induct [consumes 1, case_names Nil Neq Eq]:
   assumes np: "\<not> prefix ps ls"
     and base: "\<And>x xs. P (x#xs) []"
     and r1: "\<And>x xs y ys. x \<noteq> y \<Longrightarrow> P (x#xs) (y#ys)"
     and r2: "\<And>x xs y ys. \<lbrakk> x = y; \<not> prefix xs ys; P xs ys \<rbrakk> \<Longrightarrow> P (x#xs) (y#ys)"
-  shows "P ps ls" using np
-
+  shows "P ps ls" 
+using np
 proof (induct ls arbitrary: ps)
   case Nil
   then show ?case

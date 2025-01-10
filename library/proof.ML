@@ -3,8 +3,7 @@ signature IPS_PROOF = sig
 type stack
 type state
 type operation = state -> state
-type parse_ctxt = Context.generic
-type command = parse_ctxt -> operation parser
+type command = operation parser
 
 exception OPR_FAIL of string
 
@@ -76,10 +75,10 @@ val RULE_CMD : command
 
 (* Toplevel *)
 
-val parse_cmds : parse_ctxt -> string -> operation
+val parse_cmds : string -> operation
 val PROVE : operation -> Proof.context -> thm -> thm
 
-val METHOD : parse_ctxt -> string -> Method.method
+val METHOD : string -> Method.method
 
 end
 
@@ -115,8 +114,7 @@ type state = stack              (*current stack*)
            * int                (*cache id*)
 
 type operation = state -> state
-type parse_ctxt = Context.generic
-type command = parse_ctxt -> operation parser
+type command = operation parser
 
 exception BROKEN_INVARIANT
 
@@ -128,7 +126,16 @@ fun is_protected (\<^Const>\<open>Pure.prop\<close> $ _) = true
   | is_protected (\<^Const>\<open>Pure.imp\<close> $ _ $ X) = is_protected X
   | is_protected (\<^Const>\<open>Pure.all _\<close> $ Abs (_,_, X)) = is_protected X
   | is_protected _ = false
-  
+
+fun mk_binding long_name =
+  let val names = Long_Name.explode long_name
+      fun mk [] = error "BUG"
+        | mk [x] = Binding.name x
+        | mk (q::L) = Binding.qualify_name true (mk L) q
+   in case names
+   of "local"::L => mk L
+    | L => mk L
+  end
 
 (** Basic Operations **)
 
@@ -164,7 +171,7 @@ fun beta_eta_contract th =
   then Thm.equal_elim (Drule.beta_eta_conversion (Thm.cprop_of th)) th
   else th
 
-(*Modus Ponens*)
+(* Modus Ponens *)
 fun norm_tyenv tyenv
   = TVars.build (Vartab.fold (fn (N,(S,T)) => TVars.add ((N,S), Envir.norm_type tyenv T)) tyenv)
 
@@ -219,6 +226,79 @@ fun MP ctxt thAB thA =
 
 fun join_lstR pr = AList.join (op =) (fn _ => fn (_,x) => x) pr
 fun join_lstL pr = AList.join (op =) (fn _ => fn (x,_) => x) pr
+
+(* Helpers II *)
+
+fun elim_conjs ctxt =
+  let fun elim thm =
+      case Thm.prop_of thm
+        of \<^Const>\<open>Pure.conjunction\<close> $ _ $ _ =>
+            elim (MP ctxt @{thm Pure.conjunctionD1} thm) @
+            elim (MP ctxt @{thm Pure.conjunctionD2} thm)
+         | \<^Const>\<open>Trueprop\<close> $ (\<^Const>\<open>HOL.conj\<close> $ _ $ _) =>
+            elim (MP ctxt @{thm HOL.conjunct1} thm) @
+            elim (MP ctxt @{thm HOL.conjunct2} thm)
+         | _ => [thm]
+   in elim
+  end
+
+fun wraps ctxt ths = ths
+      |> map (Conv.fconv_rule (HOLogic.Trueprop_conv (Conv.rewr_conv @{thm TAG_def[symmetric]})))
+      |> foldr1 (fn (A,B) => MP ctxt (MP ctxt @{thm conjI} A) B)
+
+val is_tagged =
+  let fun chk (\<^Const>\<open>Trueprop\<close> $ X) = chk X
+        | chk (\<^Const>\<open>TAG _\<close> $ _) = true
+        | chk (\<^Const>\<open>HOL.conj\<close> $ A $ B) = chk A andalso chk B
+        | chk (\<^Const>\<open>Pure.imp\<close> $ A $ B) = chk A orelse chk B
+        | chk (\<^Const>\<open>Pure.all _\<close> $ Abs (_, _, X)) = chk X
+        | chk _ = false
+   in chk
+  end
+
+fun is_Trueprop (\<^Const>\<open>Trueprop\<close> $ _) = true
+  | is_Trueprop _ = false
+
+fun is_tagged_Trueprop x = is_Trueprop x andalso is_tagged x
+
+fun remove_TAG_premises ctxt th =
+  let fun conv ctxt ctm =
+        let val tm = Thm.term_of ctm
+         in if exists is_tagged (Logic.strip_imp_prems tm)
+          then case tm
+            of \<^Const>\<open>Pure.imp\<close> $ X $ _ =>
+                if is_tagged_Trueprop X
+                then (case X
+                  of \<^Const>\<open>Trueprop\<close> $ (\<^Const>\<open>conj\<close> $ _ $ _) =>
+                      (Conv.rewr_conv @{thm BNF_Fixpoint_Base.conj_imp_eq_imp_imp}
+                       then_conv conv ctxt) ctm
+                   | \<^Const>\<open>Trueprop\<close> $ (\<^Const>\<open>TAG _\<close> $ _) =>
+                      (Conv.arg1_conv (HOLogic.Trueprop_conv (Conv.rewr_conv @{thm TAG_def}))
+                       then_conv conv ctxt) ctm)
+                else Conv.combination_conv (Conv.arg_conv (conv ctxt)) (conv ctxt) ctm
+             | \<^Const>\<open>Pure.all _\<close> $ Abs (_, _, _) =>
+                  Conv.abs_conv (fn (_,ctxt) => conv ctxt) ctxt ctm
+          else Conv.all_conv ctm
+        end
+   in if exists is_tagged (Thm.prems_of th)
+      then Conv.fconv_rule (conv ctxt) th
+      else th
+  end
+
+fun unwrap_conjs' ctxt th = th
+      |> elim_conjs ctxt
+      |> map (Conv.fconv_rule (HOLogic.Trueprop_conv (Conv.rewr_conv @{thm TAG_def})))
+
+fun unwrap_conjs ctxt th =
+      if is_Trueprop (Thm.prop_of th) andalso is_tagged (Thm.prop_of th)
+      then unwrap_conjs' ctxt th
+      else raise THM ("Not tagged", 0, [th])
+
+fun unwrap ctxt th = th
+      |> unwrap_conjs ctxt
+      |> map (remove_TAG_premises ctxt)
+
+(* Maintain *)
 
 (*primary is the newer. The newer is appended to the list*)
 fun cat_pctxt (vs',hs') (vs,hs)
@@ -360,13 +440,18 @@ fun OPR (f : stack -> stack) ((S,TAB,ID) : state) : state
 fun OPR_ID (f : int -> stack -> stack) ((S,TAB,ID) : state) : state
   = (f ID S, TAB, ID+1)
 
+fun CONTEXTUAL_CMD (parser : Proof.context -> command)
+                   (toks : Token.src)
+  = ((fn (s:state) => fst (parser (#1 (#1 s)) toks) s), [])
+
+
 val INTRO = OPR o INTRO'
 val VARS = (Parse.$$$ "VARS" || Parse.$$$ "vars") |-- Scan.repeat Parse.binding
 val VARS_FOR_SINGLE_GOAL = Scan.option VARS >> SINGLE_GOAL
 val IN = (Parse.$$$ "IN" || Parse.$$$ "in")
 
-val INTRO_CMD = K ( VARS_FOR_SINGLE_GOAL >> INTRO)
-val INTRO_ALL_CMD = K (Scan.succeed (INTRO ALL_SUBGOALS))
+val INTRO_CMD = VARS_FOR_SINGLE_GOAL >> INTRO
+val INTRO_ALL_CMD = Scan.succeed (INTRO ALL_SUBGOALS)
 
 val SOLVED_GOAL = \<^prop>\<open>True\<close>
 
@@ -419,7 +504,7 @@ fun APPLY text =
       OPR (fn SK as (ctxt, _) =>
         apply_method (Method.evaluate_runtime text ctxt) NONE SK)
 
-val APPLY_CMD = K (Method.parse >> (fn (m,_) => APPLY m))
+val APPLY_CMD = Method.parse >> (fn (m,_) => APPLY m)
 
 (* UNFOLD *)
 
@@ -454,9 +539,9 @@ fun UNFOLD_FACT' prep_thms raw_defs fact_names (ctxt, SK as HHF (st, pctxt) :: S
   | UNFOLD_FACT' _ _ _ _ = raise BROKEN_INVARIANT
 
 val UNFOLD = OPR o UNFOLD' (K I)
-val UNFOLD_CMD = K ( Parse.thms1 -- Scan.option (IN |-- Scan.repeat1 Parse.name) >> (
+val UNFOLD_CMD = Parse.thms1 -- Scan.option (IN |-- Scan.repeat1 Parse.name) >> (
       fn (defs, NONE)       => OPR (UNFOLD' Attrib.eval_thms defs)
-       | (defs, SOME facts) => OPR (UNFOLD_FACT' Attrib.eval_thms defs facts) ))
+       | (defs, SOME facts) => OPR (UNFOLD_FACT' Attrib.eval_thms defs facts) )
 
 (* Crush *)
 
@@ -481,11 +566,11 @@ fun CRUSH' _ (ctxt, []) = (ctxt, [])
 
 val CRUSH = OPR o CRUSH'
 
-val CRUSH_CMD = K (Scan.optional (VARS >> (SINGLE_GOAL o SOME)) ALL_SUBGOALS >> CRUSH)
+val CRUSH_CMD = Scan.optional (VARS >> (SINGLE_GOAL o SOME)) ALL_SUBGOALS >> CRUSH
 
 (* INDUCT & CASE *)
 
-fun CASES' tac (SK as (ctxt0, HHF (st00, _) :: _)) =
+fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
   apply' tac NONE SK |> (fn (ctxt, SK as HHF (rule, pctxt0) :: REMAIN_SK) =>
    let val cases = Proof_Context.dest_cases (SOME ctxt0) ctxt
        val used_qualifiers = quanlifiers_of (print_stack SK)
@@ -548,7 +633,13 @@ fun CASES' tac (SK as (ctxt0, HHF (st00, _) :: _)) =
          |> fold_burrow ( Assumption.add_assms export
                         o map (Thm.cterm_of ctxt) ) (map #2 asms)
          |-> (fn thms =>
-            Proof_Context.note_thmss "" (bindings ~~ (map o map) (fn th => ([th], [])) thms))
+           let val tagged = maps (filter (is_tagged_Trueprop o Thm.prop_of)) thms
+               val thms   = map (filter_out (is_tagged_Trueprop o Thm.prop_of)) thms
+               val notes = bindings ~~ thms
+                        |> filter_out (null o snd)
+                        |> map (apsnd (map (fn th => ([remove_TAG_premises ctxt th], []))))
+            in Proof_Context.note_thmss "" (ADDITIONAL_NOTES ctxt tagged @ notes)
+           end )
          |-> (fn thms =>
         let val pctxt' = (map (apfst Binding.name_of) fixes, map (apsnd (map Thm.prop_of)) thms)
          in if null remaining_cases
@@ -565,7 +656,7 @@ fun CASES' tac (SK as (ctxt0, HHF (st00, _) :: _)) =
     in CB true rule cases ctxt (Drule.dummy_thm, ([],[]), REMAIN_SK)
    end
      | _ => raise BROKEN_INVARIANT)
-  | CASES' _ _ = raise BROKEN_INVARIANT
+  | CASES' _ _ _ = raise BROKEN_INVARIANT
 
 (* Syntax *)
 
@@ -635,7 +726,7 @@ fun case_synt ctxt toks = case case_synt' (ctxt, toks) of (x, (_, toks)) => (x,t
 in
 
 fun INDUCT' (no_simp, (insts, ((arbitrary, taking), opt_rule))) (ctxt, SK) =
-  let (* val (_, facts, _) = collect_context (print_stack SK)
+  let val (_, facts, _) = collect_context (print_stack SK)
       val facts = map (fn (name, _) => (name, Proof_Context.get_thms ctxt name)) facts
       
       val dirty_frees = fold (fold (fn NONE => I
@@ -646,28 +737,47 @@ fun INDUCT' (no_simp, (insts, ((arbitrary, taking), opt_rule))) (ctxt, SK) =
       val tamper_facts = map (apsnd (map (` ( Term.exists_subterm (fn Free f => dirty f
                                                                     | _ => false)
                                             o Thm.prop_of)))) facts
-      val tamper_facts' = maps (map_filter (fn (true, x) => SOME x | _ => NONE) o snd) tamper_facts *)
+                      |> filter (exists fst o snd)
+      val tamper_fact' = maps (map_filter (fn (true, x) => SOME x | _ => NONE) o snd) tamper_facts
 
-      val tac = Induct.induct_context_tactic (not no_simp) insts arbitrary taking opt_rule [] 1
-   in CASES' tac (ctxt, SK)
+      val tac = Induct.induct_context_tactic (not no_simp) insts arbitrary taking opt_rule
+                  (if null tamper_fact' then [] else [wraps ctxt tamper_fact']) 1
+
+      fun update_tampered ctxt th =
+        let val ths = unwrap_conjs ctxt th
+            fun burrow' [] _ = []
+              | burrow' ((true , _ ) :: L) (th::ths) = th :: burrow' L ths
+              | burrow' ((false, th) :: L) (    ths) = th :: burrow' L ths
+              | burrow' _ _ = error "BUG"
+            fun burrow'2 [] ths = ths
+              | burrow'2 ((true , _) :: L) (_ ::ths) = burrow'2 L ths
+              | burrow'2 ((false, _) :: L) (    ths) = burrow'2 L ths
+              | burrow'2 _ _ = error "BUG"
+            fun burrow [] [] = []
+              | burrow ((N, L) :: L') ths = (N, burrow' L ths) :: burrow L' (burrow'2 L ths)
+              | burrow _ _ = error "BUG"
+            val tamper_facts'' = burrow tamper_facts ths
+         in map (fn (B,ths) => ((mk_binding B, []), [(ths,[])]) ) tamper_facts''
+        end
+   in CASES' (maps o update_tampered) tac (ctxt, SK)
   end
 
 fun CASE' (no_simp, (insts, opt_rule)) =
   let val tac = Induct.cases_context_tactic (not no_simp) insts opt_rule [] 1
-   in CASES' tac
+   in CASES' (K (K [])) tac
   end
 
 val INDUCT = OPR o INDUCT'
-fun INDUCT_CMD ctxt =
-         ind_synt ctxt
+val INDUCT_CMD = CONTEXTUAL_CMD (fn ctxt =>
+         ind_synt (Context.Proof ctxt)
       >> (fn (no_simp, (insts, ((arbitrary, taking), opt_rule))) =>
-          INDUCT (no_simp, (insts, ((arbitrary, taking), opt_rule))) )
+          INDUCT (no_simp, (insts, ((arbitrary, taking), opt_rule))) ))
 
 val CASE = OPR o CASE'
-fun CASE_CMD ctxt =
-         case_synt ctxt
+val CASE_CMD = CONTEXTUAL_CMD (fn ctxt =>
+         case_synt (Context.Proof ctxt)
       >> (fn (no_simp, (insts, opt_rule)) =>
-          CASE (no_simp, (insts, opt_rule)))
+          CASE (no_simp, (insts, opt_rule))) )
 
 end
 
@@ -684,24 +794,12 @@ fun RULE' raw_rules raw_facts (SK as (ctxt, _)) =
 
 val RULE = OPR oo RULE'
 val RULE_CMD = let open Parse
-      in K ( Scan.optional thms1 []
-          -- Scan.optional (($$$ "with" || $$$ "WITH") |-- thms1) [] >> uncurry RULE) end
+      in Scan.optional thms1 []
+      -- Scan.optional (($$$ "with" || $$$ "WITH") |-- thms1) [] >> uncurry RULE
+     end
 
 
 (* HAVE *)
-
-fun elim_conjs ctxt =
-  let fun elim thm =
-      case Thm.prop_of thm
-        of \<^Const>\<open>Pure.conjunction\<close> $ _ $ _ =>
-            elim (MP ctxt @{thm Pure.conjunctionD1} thm) @
-            elim (MP ctxt @{thm Pure.conjunctionD2} thm)
-         | \<^Const>\<open>Trueprop\<close> $ (\<^Const>\<open>HOL.conj\<close> $ _ $ _) =>
-            elim (MP ctxt @{thm HOL.conjunct1} thm) @
-            elim (MP ctxt @{thm HOL.conjunct2} thm)
-         | _ => [thm]
-   in elim
-  end
 
 fun HAVE' _ _ (ctxt, []) = (ctxt, [])
   | HAVE' raw_name expr (ctxt, HHF (G,pctxt) :: S) =
@@ -732,10 +830,10 @@ fun HAVE' _ _ (ctxt, []) = (ctxt, [])
 
 val HAVE = OPR oo HAVE'
 
-val HAVE_CMD = K (
+val HAVE_CMD =
         Scan.option (Parse.name -- Parse.opt_attribs --| \<^keyword>\<open>:\<close>) --
         Parse.term
-     >> (fn (name, expr) => HAVE name expr))
+     >> (fn (name, expr) => HAVE name expr)
 
 (* OBTAIN *)
 
@@ -936,12 +1034,12 @@ val structured_statement =
     >> (fn ((shows, assumes), fixes) => (fixes, assumes, shows));
 
 val CONSIDER = OPR o CONSIDER'
-val CONSIDER_CMD = K (fn toks => (
+fun CONSIDER_CMD toks = (
      Parse.enum1 "|"
         (Scan.optional (Parse.vars --| Parse.where_) []
           -- structured_statement
         >> (fn (vs,(a,b,c)) => (vs,a,b,c)))
-     >> CONSIDER) toks)
+     >> CONSIDER) toks
 
 (* CONSIDER *)
 
@@ -1012,7 +1110,7 @@ fun HAMMER_all step_id =
   end
 
 val HAMMER = OPR_ID (HAMMER_i o string_of_int)
-val HAMMER_CMD = K (Scan.succeed HAMMER)
+val HAMMER_CMD = Scan.succeed HAMMER
 
 (* END *)
 
@@ -1036,8 +1134,8 @@ fun END' T jj ID (stack as (_, HHF _ :: _)) =
 
 val END = OPR_ID (END' T_END 0)
 val NXT = OPR_ID (END' T_NXT 0)
-val END_CMD = K (Scan.succeed END)
-val NXT_CMD = K (Scan.succeed NXT)
+val END_CMD = Scan.succeed END
+val NXT_CMD = Scan.succeed NXT
 
 (* LET *)
 
@@ -1073,9 +1171,9 @@ fun LET' prep_terms raw_binds (ctxt, S) =
       (gen_bind prep_terms raw_binds ctxt, S)
 
 val LET = OPR o LET' (fn ctxt => fn _ => map (Proof_Context.cert_term ctxt))
-val LET_CMD = K (
+val LET_CMD =
   (Parse.and_list1 (Parse.and_list1 Parse.term -- (\<^keyword>\<open>=\<close> |-- Parse.term))
-    >> (OPR o LET' read_terms)))
+    >> (OPR o LET' read_terms))
 
 
 end
@@ -1092,7 +1190,7 @@ fun CHOOSE' prep_terms raw_terms (ctxt, HHF (st, pctxt) :: SK) =
   | CHOOSE' _ _ _ = raise BROKEN_INVARIANT
 
 val CHOOSE = OPR o CHOOSE' (K I)
-val CHOOSE_CMD = K (Scan.repeat1 Parse.term >> (OPR o CHOOSE' Syntax.read_terms))
+val CHOOSE_CMD = Scan.repeat1 Parse.term >> (OPR o CHOOSE' Syntax.read_terms)
 
 (* PRINT *)
 
@@ -1144,7 +1242,7 @@ fun PRINT (state as ((ctxt,SK), _, ID)) =
       ])
     ; state
   end
-val PRINT_CMD = K  (Scan.succeed PRINT)
+val PRINT_CMD = Scan.succeed PRINT
 
 (** Toplevel **)
 
@@ -1225,7 +1323,7 @@ val keywords = let open Keyword
          ]
      end
 
-fun parse_cmds ctxt source =
+fun parse_cmds source =
   let val pos = Position.make {
                   line=1, offset=1, end_offset=1,
                   props={label="", file="#MINSHELL SCRIPT", id="no_id"} }
@@ -1245,7 +1343,7 @@ fun parse_cmds ctxt source =
       val cmds = split [] [] toks
               |> map (fn (h::toks) =>
                     case Symtab.lookup CMDS (Token.content_of h)
-                      of SOME parser => fst (parser ctxt toks)
+                      of SOME parser => fst (parser toks)
                        | NONE => error ("Bad Command " ^ Token.content_of h) )
    in fold_rev I cmds
   end
@@ -1268,12 +1366,12 @@ fun METHOD_i tr : Method.method = CONTEXT_METHOD (fn _ => fn (ctxt,st) =>
   else Seq.make (fn () =>
         SOME (Seq.Result (ctxt, PROVE tr ctxt st), Seq.empty)))
 
-val METHOD = METHOD_i oo parse_cmds
+val METHOD = METHOD_i o parse_cmds
 
 val _ = Theory.setup (
   Method.setup \<^binding>\<open>min_script\<close> (
-    Scan.peek (fn ctxt => Parse.embedded >> (fn src => fn _ =>
-        METHOD ctxt src)))
+    Scan.peek (fn _ => Parse.embedded >> (fn src => fn _ =>
+        METHOD src)))
   ""
 )
 

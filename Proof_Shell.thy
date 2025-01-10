@@ -6,6 +6,8 @@ begin
 
 declare [[ML_debugger, ML_exception_trace]]
 
+definition \<open>TAG X \<equiv> X\<close>
+
 ML_file \<open>./library/proof.ML\<close>
 
 ML \<open>Long_Name.explode "a.b.c" |> front\<close>
