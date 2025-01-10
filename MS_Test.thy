@@ -297,13 +297,12 @@ lemma polyfun_extremal_lemma':
     shows "\<exists>M. \<forall>z. M \<le> norm(z) \<longrightarrow> norm (\<Sum>i\<le>n. c(i) * z^i) \<le> e * norm(z) ^ (Suc n)"
   by (min_script \<open>
 INDUCT n
-PRINT
 NEXT
 CONSIDER M where "\<And>z. M \<le> norm z \<Longrightarrow> norm (\<Sum>i\<le>n. c i * z^i) \<le> e * norm z ^ Suc n" END
 RULE exI [where x= "max M (1 + norm(c(Suc n)) / e)"]
 CRUSH
-PRINT
-HAVE "e + norm (c (Suc n)) \<le> e * norm z" END
+HAVE "e + norm (c (Suc n)) \<le> e * norm z"
+  END WITH \<open>1 + norm (c (Suc n)) / e \<le> norm z\<close>
 HAVE "norm (\<Sum>i\<le>n. c i * z^i) \<le> e * norm z ^ Suc n" END
 HAVE "norm (\<Sum>i\<le>n. c i * z^i) + norm (c (Suc n) * z ^ Suc n) \<le> e * norm z ^ Suc n + norm (c (Suc n) * z ^ Suc n)" END
 HAVE "norm ((\<Sum>i\<le>n. c i * z^i) + c (Suc n) * z ^ Suc n) \<le> e * norm z ^ Suc n + norm (c (Suc n) * z ^ Suc n)" END
@@ -385,7 +384,7 @@ NEXT
 CONSIDER M where "\<And>z. M \<le> norm z \<Longrightarrow> norm (\<Sum>i\<le>n. c i * z^i) \<le> e * norm z ^ Suc n" END
 CHOOSE "max M (1 + norm(c(Suc n)) / e)"
 CRUSH
-HAVE "e + norm (c (Suc n)) \<le> e * norm z" END
+HAVE "e + norm (c (Suc n)) \<le> e * norm z" END WITH \<open>1 + norm (c (Suc n)) / e \<le> norm z\<close>
 HAVE "norm (\<Sum>i\<le>n. c i * z^i) \<le> e * norm z ^ Suc n" END
 HAVE "norm (\<Sum>i\<le>n. c i * z^i) + norm (c (Suc n) * z ^ Suc n) \<le> e * norm z ^ Suc n + norm (c (Suc n) * z ^ Suc n)" END
 HAVE "norm ((\<Sum>i\<le>n. c i * z^i) + c (Suc n) * z ^ Suc n)

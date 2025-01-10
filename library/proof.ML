@@ -55,13 +55,13 @@ val CONSIDER : (
           -> operation
 val CONSIDER_CMD : command
 
-val HAMMER : operation
+val HAMMER : Sledgehammer.fact_override -> operation
 val HAMMER_CMD : command
 
-val END : operation
+val END : Sledgehammer.fact_override -> operation
 val END_CMD : command
 
-val NXT : operation
+val NXT : Sledgehammer.fact_override -> operation
 val NXT_CMD : command
 
 val LET : (term list * term) list -> operation
@@ -1091,51 +1091,58 @@ fun CONSIDER' raw_terms (ctxt, HHF (st,facts,IA) :: SK) =
 *)
 (* HAMMER *)
 
-fun HAMMER_i step_id (ctxt, HHF (s,facts) :: S) =
+fun HAMMER_i override step_id (ctxt, HHF (s,facts) :: S) =
   let val SOME (_, _, ID_BASE) = IPS_Data.get ctxt
       val ID = ID_BASE ^ "/" ^ step_id
-      val s' = Phi_Sledgehammer_Solver.auto (SOME ID) ctxt s
+      val s' = Phi_Sledgehammer_Solver.auto override (SOME ID) ctxt s
    in maintain (ctxt, HHF (s', facts) :: S)
   end
-  | HAMMER_i _ _ = raise BROKEN_INVARIANT
+  | HAMMER_i _ _ _ = raise BROKEN_INVARIANT
 
-fun HAMMER_all step_id =
+fun HAMMER_all override step_id =
   let val ID_BASE = step_id ^ "/"
       fun loop j (stack as (_, HHF (s,_) :: _)) =
         if Thm.no_prems s then stack
-        else HAMMER_i (ID_BASE ^ string_of_int j) stack
+        else HAMMER_i override (ID_BASE ^ string_of_int j) stack
           |> loop (j+1)
         | loop _ _ = raise BROKEN_INVARIANT
    in loop 0
   end
 
-val HAMMER = OPR_ID (HAMMER_i o string_of_int)
-val HAMMER_CMD = Scan.succeed HAMMER
+val orverride_parser =
+        Scan.repeat (   (Parse.$$$ "WITH"    |-- Scan.repeat Parse.thm >> rpair [])
+                     || (Parse.$$$ "WITHOUT" |-- Scan.repeat Parse.thm >>  pair []) )
+     >> (fn LL => fold_rev (fn (A,D) => fn (A',D') => (A @ A', D @ D') ) LL ([],[])
+               |> (fn (A,D) => {add = A, del = D, only = false}))
+
+
+fun HAMMER override = OPR_ID (HAMMER_i override o string_of_int)
+val HAMMER_CMD = orverride_parser >> HAMMER
 
 (* END *)
 
-fun END' T jj ID (stack as (_, HHF _ :: _)) =
+fun END' SH_override T jj ID (stack as (_, HHF _ :: _)) =
   let val ID_BASE = if jj = 0 then string_of_int ID 
                     else string_of_int ID ^ "+" ^ string_of_int jj
-      val (ctxt, SK'1) = HAMMER_all ID_BASE stack
+      val (ctxt, SK'1) = HAMMER_all SH_override ID_BASE stack
    in case SK'1
    of HHF s :: ENDBLK T' :: SK' =>
            if T = T' then maintain (ctxt, HHF s :: SK')
            else if T = T_END andalso T' = T_NXT andalso Config.get ctxt END_completes_all_NEXT
            then maintain (ctxt, HHF s :: SK')
-             |> END' T_END (jj+1) ID
+             |> END' SH_override T_END (jj+1) ID
            else raise OPR_FAIL (
                   "This block should be closed by the " ^
                   (case T' of T_END => "END" | T_NXT => "NEXT") ^
                   " command.")
     | _ => raise BROKEN_INVARIANT
   end
-  | END' _ _ _ _ = raise BROKEN_INVARIANT
+  | END' _ _ _ _ _ = raise BROKEN_INVARIANT
 
-val END = OPR_ID (END' T_END 0)
-val NXT = OPR_ID (END' T_NXT 0)
-val END_CMD = Scan.succeed END
-val NXT_CMD = Scan.succeed NXT
+fun END SH_override = OPR_ID (END' SH_override T_END 0)
+fun NXT SH_override = OPR_ID (END' SH_override T_NXT 0)
+val END_CMD = orverride_parser >> END
+val NXT_CMD = orverride_parser >> NXT
 
 (* LET *)
 
@@ -1301,6 +1308,7 @@ val keywords = let open Keyword
            (("=",     \<^here>), quasi_command_spec),
            (("for",   \<^here>), quasi_command_spec),
            (("WITH",  \<^here>), quasi_command_spec),
+           (("WITHOUT",\<^here>),quasi_command_spec),
            (("IN",    \<^here>), quasi_command_spec),
            (("VARS",  \<^here>), quasi_command_spec),
 
