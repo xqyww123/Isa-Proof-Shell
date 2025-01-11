@@ -39,7 +39,10 @@ val INDUCT : bool * ((binding option * (term * bool)) option list list *
           -> state -> state
 val INDUCT_CMD : command
 
-val CASE : bool * (term option list list * thm option) -> operation
+val CASE_SPLIT : bool * (term option list list * thm option) -> operation
+val CASE_SPLIT_CMD : command
+
+val CASE : Sledgehammer.fact_override -> (string * string option list) option -> operation
 val CASE_CMD : command
 
 val record_history : string -> operation
@@ -112,6 +115,7 @@ datatype frame = HHF   of thm (*a local_facts bundle node, represented as a Here
                         * param
                | ENDBLK of endblk_type
 
+val trivial_goal = Goal.protect 0 @{thm TrueI}
 exception NO_PARAM
 
 type stack = Proof.context * (frame list)
@@ -170,7 +174,7 @@ fun read_with ctxt with_lems =
          |> map (fn th => (flag, name, th) )
         end ) with_lems
 
-fun apply_WITH with_lems ctxt =
+fun apply_WITH with_lems =
   fold (fn (flag, name, thm) =>
     Context.proof_map (Phi_Sledgehammer_Solver.with_rule flag name thm)) with_lems
 
@@ -331,19 +335,23 @@ fun unwrap_conjs ctxt th =
       then unwrap_conjs' ctxt th
       else raise THM ("Not tagged", 0, [th])
 
+(*
 fun unwrap ctxt th = th
       |> unwrap_conjs ctxt
       |> map (remove_TAG_premises ctxt)
+*)
 
 (* Maintain *)
 
 (*primary is the newer. The newer is appended to the list*)
 fun cat_pctxt (vs',hs') (vs,hs)
       = (join_lstR (vs', vs), join_lstL (hs', hs))
+(*
 fun append_print pctxt' (PROP (pctxt, goal))
       = (PROP  (cat_pctxt pctxt' pctxt, goal))
   | append_print pctxt' (BUNDL (pctxt, goal))
       = (BUNDL (cat_pctxt pctxt' pctxt, goal))
+*)
 fun prepend_print pctxt' (PROP (pctxt, goal))
       = (PROP  (cat_pctxt pctxt pctxt', goal))
   | prepend_print pctxt' (BUNDL (pctxt, goal))
@@ -587,7 +595,7 @@ val crush_timeout = Attrib.setup_config_int \<^binding>\<open>crush_timeout\<clo
 fun CRUSH' _ _ (ctxt, []) = (ctxt, [])
   | CRUSH' prep_with (imode, raw_with_lems) (s as (ctxt, _)) =
   let val with_lems = prep_with ctxt raw_with_lems
-      val ctxt = apply_WITH with_lems ctxt ctxt
+      val ctxt = apply_WITH with_lems ctxt
       val time = Config.get ctxt crush_timeout
               |> Time.fromSeconds
    in
@@ -612,6 +620,8 @@ val CRUSH_CMD =
 
 (* INDUCT & CASE *)
 
+exception CASE_NAME of (string * string option list) option
+
 fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
   apply' tac NONE SK |> (fn (ctxt, SK as HHF (rule, pctxt0) :: REMAIN_SK) =>
    let val cases = Proof_Context.dest_cases (SOME ctxt0) ctxt
@@ -619,7 +629,7 @@ fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
        val cases = Name.variant_list used_qualifiers (map #1 cases)
                 ~~ map #2 cases
        fun CB initial rule cases
-              ctxt' (lem, _, SK, _) =
+              ctxt' (lem, _, SK, param) =
         let val rule' =
                 if initial then rule
                 else lem
@@ -630,23 +640,36 @@ fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
          of [] =>
             (ctxt, HHF (rule', pctxt0) :: SK)
           | ((name, kase) :: remaining_cases) =>
-        let val name = if Char.isAlpha (String.sub (name, 0)) then name
-                       else "case_" ^ name
+        let val opt_case_name = case param of CASE_NAME param => param
+                                            | NO_PARAM => NONE
+                                            | _ => raise BROKEN_INVARIANT
+            val name = case opt_case_name
+                         of SOME (name, _) => name
+                          | _ => if Char.isAlpha (String.sub (name, 0)) then name
+                                 else "case_" ^ name
             val kase = case kase
                   of Rule_Cases.Case {fixes, assumes, binds, cases} =>
                      Rule_Cases.Case {
-                       fixes = fold_map (fn (B,T) => fn names =>
-                            let val name = Binding.name_of B
-                                val name = if Name.is_internal name then Name.dest_internal name
-                                                                    else name
-                                (* val (name, names) = if name = ""
-                                                    then Name.variant "case" names
-                                                    else (name, names) *)
-                                (* val (name, names) = Name.variant name names *)
-                             in ((Binding.name name,T), names)
-                            end ) fixes (Variable.names_of ctxt)
-                            |> #1,
-                       assumes=assumes,
+                       fixes = (
+                         case opt_case_name
+                           of SOME (_, fixes') =>
+                              map2 (fn NONE => I
+                                     | SOME name => fn (_, T) => (Binding.name name, T)
+                                   ) fixes' fixes
+                            | _ => fold_map (fn (B,T) => fn names =>
+                              let val name = Binding.name_of B
+                                  val name = if Name.is_internal name then Name.dest_internal name
+                                                                      else name
+                                  (* val (name, names) = if name = ""
+                                                      then Name.variant "case" names
+                                                      else (name, names) *)
+                                  (* val (name, names) = Name.variant name names *)
+                               in ((Binding.name name,T), names)
+                              end ) fixes (Variable.names_of ctxt)
+                              |> #1 ),
+                       assumes = map_index (fn (i,(N,tms)) =>
+                                    if N = "" then ("prem" ^ string_of_int i, tms)
+                                              else (N, tms) ) assumes,
                        binds=binds,
                        cases=cases
                      }
@@ -694,13 +717,16 @@ fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
                  :: MAGIC (CB false rule' remaining_cases, K I, NO_PARAM)
                  :: SK)
          else rpair ( HHF (goal, pctxt')
-                 :: ENDBLK T_NXT
+                 :: ENDBLK T_CASE
                  :: MAGIC (CB false rule' remaining_cases, K I, NO_PARAM)
                  :: SK)
         end )
         end
         end
-    in CB true rule cases ctxt (Drule.dummy_thm, ([],[]), REMAIN_SK, NO_PARAM)
+    in (ctxt, HHF (trivial_goal, ([],[]))
+           :: ENDBLK T_CASE
+           :: MAGIC (CB true rule cases, K I, CASE_NAME NONE)
+           :: REMAIN_SK)
    end
      | _ => raise BROKEN_INVARIANT)
   | CASES' _ _ _ = raise BROKEN_INVARIANT
@@ -809,7 +835,7 @@ fun INDUCT' (no_simp, (insts, ((arbitrary, taking), opt_rule))) (ctxt, SK) =
    in CASES' (maps o update_tampered) tac (ctxt, SK)
   end
 
-fun CASE' (no_simp, (insts, opt_rule)) =
+fun CASE_SPLIT' (no_simp, (insts, opt_rule)) =
   let val tac = Induct.cases_context_tactic (not no_simp) insts opt_rule [] 1
    in CASES' (K (K [])) tac
   end
@@ -820,11 +846,11 @@ val INDUCT_CMD = CONTEXTUAL_CMD (fn ctxt =>
       >> (fn (no_simp, (insts, ((arbitrary, taking), opt_rule))) =>
           INDUCT (no_simp, (insts, ((arbitrary, taking), opt_rule))) ))
 
-val CASE = OPR o CASE'
-val CASE_CMD = CONTEXTUAL_CMD (fn ctxt =>
+val CASE_SPLIT = OPR o CASE_SPLIT'
+val CASE_SPLIT_CMD = CONTEXTUAL_CMD (fn ctxt =>
          case_synt (Context.Proof ctxt)
       >> (fn (no_simp, (insts, opt_rule)) =>
-          CASE (no_simp, (insts, opt_rule))) )
+          CASE_SPLIT (no_simp, (insts, opt_rule))) )
 
 end
 
@@ -1163,28 +1189,41 @@ val HAMMER_CMD = orverride_parser >> HAMMER
 
 (* END *)
 
-fun END' SH_override T jj ID (stack as (_, HHF _ :: _)) =
+fun END' SH_override T param jj ID (stack as (_, HHF _ :: _)) =
   let val ID_BASE = if jj = 0 then string_of_int ID 
                     else string_of_int ID ^ "+" ^ string_of_int jj
       val (ctxt, SK'1) = HAMMER_all SH_override ID_BASE stack
    in case SK'1
    of HHF s :: ENDBLK T' :: SK' =>
-           if T = T' then maintain (ctxt, HHF s :: SK')
-           else if T = T_END andalso T' = T_NXT andalso Config.get ctxt END_completes_all_NEXT
-           then maintain (ctxt, HHF s :: SK')
-             |> END' SH_override T_END (jj+1) ID
-           else raise OPR_FAIL (
-                  "This block should be closed by the " ^
-                  (case T' of T_END => "END" | T_NXT => "NEXT") ^
-                  " command.")
+        if T = T_CASE andalso T' = T_CASE
+        then (case SK'
+          of MAGIC (CB, PRT, _) :: SK'' =>
+              maintain (ctxt, HHF s :: MAGIC (CB, PRT, param) :: SK'')
+           | _ => raise BROKEN_INVARIANT )
+        else if T = T' then maintain (ctxt, HHF s :: SK')
+        else if T = T_END
+                andalso (T' = T_NXT orelse T' = T_CASE)
+                andalso Config.get ctxt END_completes_all_NEXT
+        then maintain (ctxt, HHF s :: SK')
+          |> END' SH_override T_END param (jj+1) ID
+        else raise OPR_FAIL (
+                "This block should be closed by the " ^
+                (case T' of T_END => "END" | T_NXT => "NEXT" | T_CASE => "CASE") ^
+                " command.")
     | _ => raise BROKEN_INVARIANT
   end
-  | END' _ _ _ _ _ = raise BROKEN_INVARIANT
+  | END' _ _ _ _ _ _ = raise BROKEN_INVARIANT
 
-fun END SH_override = OPR_ID (END' SH_override T_END 0)
-fun NXT SH_override = OPR_ID (END' SH_override T_NXT 0)
-val END_CMD = orverride_parser >> END
-val NXT_CMD = orverride_parser >> NXT
+fun END SH_override = OPR_ID (END' SH_override T_END NO_PARAM 0)
+fun NXT SH_override = OPR_ID (END' SH_override T_NXT NO_PARAM 0)
+fun CASE SH_override binds = OPR_ID (END' SH_override T_CASE (CASE_NAME binds) 0)
+val END_CMD  = orverride_parser >> END
+val NXT_CMD  = orverride_parser >> NXT
+val CASE_CMD = Scan.option 
+               ( Parse.name >> rpair []
+              || \<^keyword>\<open>(\<close> |-- Parse.name -- Scan.repeat (Parse.maybe Parse.name) --| \<^keyword>\<open>)\<close> )
+            >> CASE Sledgehammer_Fact.no_fact_override
+ 
 
 (* LET *)
 
@@ -1306,7 +1345,7 @@ val CMDS = Symtab.make [
       ("NEXT",    NXT_CMD),
       ("CONSIDER",CONSIDER_CMD),
       ("HAVE",    HAVE_CMD),
-      ("CASE_SPLIT",    CASE_CMD),
+      ("CASE_SPLIT", CASE_SPLIT_CMD),
       ("INDUCT",  INDUCT_CMD),
       ("CRUSH",   CRUSH_CMD),
       ("INTRO",   INTRO_CMD),
@@ -1318,7 +1357,8 @@ val CMDS = Symtab.make [
       ("APPLY",   APPLY_CMD),
       ("apply",   APPLY_CMD),
       ("UNFOLD",  UNFOLD_CMD),
-      ("CHOOSE",  CHOOSE_CMD)
+      ("CHOOSE",  CHOOSE_CMD),
+      ("CASE"  ,  CASE_CMD)
     ]
 
 val keywords = let open Keyword
@@ -1360,6 +1400,7 @@ val keywords = let open Keyword
            (("CONSIDER",\<^here>),command_spec (prf_asm_goal, [])),
            (("HAVE",  \<^here>), command_spec (prf_goal, [])),
            (("CASE_SPLIT",  \<^here>), command_spec (prf_goal, [])),
+           (("CASE",  \<^here>), command_spec (prf_goal, [])),
            (("INDUCT",\<^here>), command_spec (prf_goal, [])),
            (("CRUSH", \<^here>), command_spec (prf_goal, [])),
            (("INTRO",\<^here>), command_spec (prf_goal, [])),

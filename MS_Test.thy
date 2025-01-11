@@ -2,7 +2,7 @@ theory MS_Test
   imports Main Proof_Shell HOL.Transcendental HOL.Groups_Big
 begin
 
-  
+       
 lemma \<open>0 < length x \<Longrightarrow> x \<noteq> []\<close>
   by (min_script \<open>CASE_SPLIT x PRINT END\<close>)
 

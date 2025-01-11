@@ -387,6 +387,8 @@ apply (min_script \<open>
     
 \<close>)
 
+thm LeastI
+
 proof(induction "LEAST n. \<exists>xs \<in>L. n = length xs" arbitrary: L)
   case 0
   have "[] \<in> L" using "0.hyps" LeastI[of "\<lambda>n. \<exists>xs\<in>L. n = length xs"] \<open>L \<noteq> {}\<close>
