@@ -409,22 +409,28 @@ by (min_script \<open>
 lemma Longest_common_prefix_unique:
   \<open>\<exists>! ps. (\<forall>xs \<in> L. prefix ps xs) \<and> (\<forall>qs. (\<forall>xs \<in> L. prefix qs xs) \<longrightarrow> length qs \<le> length ps)\<close>
   if \<open>L \<noteq> {}\<close>
-  using that apply (rule ex_ex1I[OF Longest_common_prefix_ex])
-  using that apply (auto simp add: prefix_def)
-  apply (metis append_eq_append_conv_if order.antisym)
-  done
+by (min_script \<open>
+  RULE ex_ex1I[OF Longest_common_prefix_ex[OF that]]
+  END
+\<close>)
 
 lemma Longest_common_prefix_eq:
  "\<lbrakk> L \<noteq> {};  \<forall>xs \<in> L. prefix ps xs;
     \<forall>qs. (\<forall>xs \<in> L. prefix qs xs) \<longrightarrow> size qs \<le> size ps \<rbrakk>
   \<Longrightarrow> Longest_common_prefix L = ps"
-unfolding Longest_common_prefix_def arg_max_def is_arg_max_linorder
-by(rule some1_equality[OF Longest_common_prefix_unique]) auto
+by (min_script \<open>
+  UNFOLD Longest_common_prefix_def arg_max_def is_arg_max_linorder
+  RULE some1_equality[OF Longest_common_prefix_unique]
+  END
+\<close>)
 
 lemma Longest_common_prefix_prefix:
   "xs \<in> L \<Longrightarrow> prefix (Longest_common_prefix L) xs"
-unfolding Longest_common_prefix_def arg_max_def is_arg_max_linorder
-by(rule someI2_ex[OF Longest_common_prefix_ex]) auto
+by (min_script \<open>
+  UNFOLD Longest_common_prefix_def arg_max_def is_arg_max_linorder
+  RULE someI2_ex[OF Longest_common_prefix_ex]
+  END
+\<close>)
 
 lemma Longest_common_prefix_longest:
   "L \<noteq> {} \<Longrightarrow> \<forall>xs\<in>L. prefix ps xs \<Longrightarrow> length ps \<le> length(Longest_common_prefix L)"
@@ -441,21 +447,17 @@ using Longest_common_prefix_prefix prefix_Nil by blast
 
 lemma Longest_common_prefix_image_Cons: "L \<noteq> {} \<Longrightarrow>
   Longest_common_prefix ((#) x ` L) = x # Longest_common_prefix L"
-apply(rule Longest_common_prefix_eq)
-  apply(simp)
- apply (simp add: Longest_common_prefix_prefix)
-apply simp
-by(metis Longest_common_prefix_longest[of L] Cons_prefix_Cons Nitpick.size_list_simp(2)
-     Suc_le_mono hd_Cons_tl order.strict_implies_order zero_less_Suc)
+by (min_script \<open>
+  RULE Longest_common_prefix_eq
+  END
+\<close>)
 
 lemma Longest_common_prefix_eq_Cons: assumes "L \<noteq> {}" "[] \<notin> L"  "\<forall>xs\<in>L. hd xs = x"
 shows "Longest_common_prefix L = x # Longest_common_prefix {ys. x#ys \<in> L}"
-proof -
-  have "L = (#) x ` {ys. x#ys \<in> L}" using assms(2,3)
-    by (auto simp: image_def)(metis hd_Cons_tl)
-  thus ?thesis
-    by (metis Longest_common_prefix_image_Cons image_is_empty assms(1))
-qed
+by (min_script \<open>
+  HAVE "L = (#) x ` {ys. x#ys \<in> L}" END
+  END
+\<close>)
 
 lemma Longest_common_prefix_eq_Nil:
   "\<lbrakk>x#ys \<in> L; y#zs \<in> L; x \<noteq> y \<rbrakk> \<Longrightarrow> Longest_common_prefix L = []"
@@ -503,22 +505,27 @@ lemma parallel_cancel:  "a#xs \<parallel> a#ys \<Longrightarrow> xs \<parallel> 
 
 theorem parallel_decomp:
   "xs \<parallel> ys \<Longrightarrow> \<exists>as b bs c cs. b \<noteq> c \<and> xs = as @ b # bs \<and> ys = as @ c # cs"
-proof (induct rule: list_induct2', blast, force, force)
-  case (4 x xs y ys)
-  then show ?case
-  proof (cases "x \<noteq> y", blast)
-    assume "\<not> x \<noteq> y" hence "x = y" by blast
-    then show ?thesis
-      using "4.hyps"[OF parallel_cancel[OF "4.prems"[folded \<open>x = y\<close>]]]
-      by (meson Cons_eq_appendI)
-  qed
-qed
+by (min_script \<open>
+  INDUCT rule: list_induct2'
+    NEXT
+    NEXT
+    NEXT
+      CASE_SPLIT "x \<noteq> y"
+      NEXT
+        HAVE "x = y" END
+  END
+\<close>)
+
+thm parallelI parallelE
 
 lemma parallel_append: "a \<parallel> b \<Longrightarrow> a @ c \<parallel> b @ d"
-  apply (rule parallelI)
-    apply (erule parallelE, erule conjE,
-      induct rule: not_prefix_induct, simp+)+
-  done
+  by (min_script \<open>
+  RULE parallelI
+  RULE parallelE
+  RULE conjE
+  INDUCT rule: not_prefix_induct
+  END
+\<close>)
 
 lemma parallel_appendI: "xs \<parallel> ys \<Longrightarrow> x = xs @ xs' \<Longrightarrow> y = ys @ ys' \<Longrightarrow> x \<parallel> y"
   by (simp add: parallel_append)

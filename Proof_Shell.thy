@@ -16,6 +16,8 @@ ML_file \<open>./library/proof.ML\<close>
 
 ML \<open>Long_Name.explode "a.b.c" |> front\<close>
 
+thm conjunct1[elim_format]
+
 notepad begin
 
   fix a b c :: nat

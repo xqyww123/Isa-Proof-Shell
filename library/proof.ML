@@ -862,11 +862,32 @@ end
 fun RULE'_i rules facts =
   apply' (fn s => CONTEXT_TACTIC (HEADGOAL (Classical.rule_tac (#1 s) rules facts)) s) NONE
 
-fun RULE' raw_rules raw_facts (SK as (ctxt, _)) =
-  let val rules = Attrib.eval_thms ctxt raw_rules
-      val facts = Attrib.eval_thms ctxt raw_facts
-   in RULE'_i rules facts SK
+fun RULE' [] raw_facts (SK as (ctxt, _)) =
+  let val facts = Attrib.eval_thms ctxt raw_facts
+   in RULE'_i [] facts SK
   end
+  | RULE' raw_rules raw_facts (ctxt, HHF (st, pctxt) :: SK) =
+  let val facts = Attrib.eval_thms ctxt raw_facts
+      val rules = maps (fn raw_rule =>
+            let val name = name_of_ref (fst raw_rule)
+             in map (fn rule0 =>
+                  let open Phi_Sledgehammer_Solver
+                      val rule = rule0 OF facts
+                   in case infer_type_of_rule name rule0
+                   of T_ELIM => (true, rule)
+                    | T_DEST => (true, Tactic.make_elim rule)
+                    | _      => (false, rule)
+                  end
+                ) (Attrib.eval_thms ctxt raw_rules)
+            end ) raw_rules
+   in st
+   |> Thm.biresolution NONE false rules 1
+   |> Seq.pull
+   |> (fn SOME (st', _) => (ctxt, HHF (st', pctxt) :: SK)
+        | NONE => raise OPR_FAIL "Fail to apply the rules" )
+   |> maintain
+  end
+  | RULE' _ _ _ = raise BROKEN_INVARIANT
 
 val RULE = OPR oo RULE'
 val RULE_CMD = let open Parse

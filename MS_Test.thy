@@ -44,7 +44,7 @@ lemma
   by (min_script \<open> 
   INTRO
   CONSIDER x :: int and z :: nat where "0 < x" and c: "2 < z" and "1 < x" PRINT end PRINT end\<close>)
-
+   
 lemma
   \<open> \<And>y. A \<and> B \<Longrightarrow> \<forall>x. P x \<Longrightarrow> P y \<and> B\<close>
   by (min_script \<open>
@@ -289,8 +289,8 @@ proof (induction "length (xs @ ys) + length xs" arbitrary: xs ys rule: less_indu
   qed
 qed
 
-
-    
+  
+           
 lemma polyfun_extremal_lemma': 
     fixes c :: "nat \<Rightarrow> 'a::real_normed_div_algebra"
   assumes "0 < e"
