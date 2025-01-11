@@ -626,13 +626,18 @@ fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
          of [] =>
             (ctxt, HHF (rule', pctxt0) :: SK)
           | ((name, kase) :: remaining_cases) =>
-        let val kase = case kase
+        let val name = if Char.isAlpha (String.sub (name, 0)) then name
+                       else "case_" ^ name
+            val kase = case kase
                   of Rule_Cases.Case {fixes, assumes, binds, cases} =>
                      Rule_Cases.Case {
                        fixes = fold_map (fn (B,T) => fn names =>
                             let val name = Binding.name_of B
                                 val name = if Name.is_internal name then Name.dest_internal name
                                                                     else name
+                                (* val (name, names) = if name = ""
+                                                    then Name.variant "case" names
+                                                    else (name, names) *)
                                 (* val (name, names) = Name.variant name names *)
                              in ((Binding.name name,T), names)
                             end ) fixes (Variable.names_of ctxt)

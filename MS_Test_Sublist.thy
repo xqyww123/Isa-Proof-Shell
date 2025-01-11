@@ -374,9 +374,19 @@ subsection \<open>Longest Common Prefix\<close>
 definition Longest_common_prefix :: "'a list set \<Rightarrow> 'a list" where
 "Longest_common_prefix L = (ARG_MAX length ps. \<forall>xs \<in> L. prefix ps xs)"
 
+ 
 lemma Longest_common_prefix_ex: "L \<noteq> {} \<Longrightarrow>
   \<exists>ps. (\<forall>xs \<in> L. prefix ps xs) \<and> (\<forall>qs. (\<forall>xs \<in> L. prefix qs xs) \<longrightarrow> size qs \<le> size ps)"
   (is "_ \<Longrightarrow> \<exists>ps. ?P L ps")
+apply (min_script \<open>
+  INDUCT "LEAST n. \<exists>xs \<in>L. n = length xs" arbitrary: L
+    HAVE "[] \<in> L" END WITH LeastI[of "\<lambda>n. \<exists>xs\<in>L. n = length xs"]
+    HAVE "?P L []" END
+  NEXT
+    LET ?EX = "\<lambda>n. \<exists>xs\<in>L. n = length xs"
+    
+\<close>)
+
 proof(induction "LEAST n. \<exists>xs \<in>L. n = length xs" arbitrary: L)
   case 0
   have "[] \<in> L" using "0.hyps" LeastI[of "\<lambda>n. \<exists>xs\<in>L. n = length xs"] \<open>L \<noteq> {}\<close>
