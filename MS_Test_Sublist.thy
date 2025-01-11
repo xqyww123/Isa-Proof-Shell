@@ -373,62 +373,38 @@ subsection \<open>Longest Common Prefix\<close>
 
 definition Longest_common_prefix :: "'a list set \<Rightarrow> 'a list" where
 "Longest_common_prefix L = (ARG_MAX length ps. \<forall>xs \<in> L. prefix ps xs)"
-
- 
+  
+    
 lemma Longest_common_prefix_ex: "L \<noteq> {} \<Longrightarrow>
   \<exists>ps. (\<forall>xs \<in> L. prefix ps xs) \<and> (\<forall>qs. (\<forall>xs \<in> L. prefix qs xs) \<longrightarrow> size qs \<le> size ps)"
   (is "_ \<Longrightarrow> \<exists>ps. ?P L ps")
-apply (min_script \<open>
+by (min_script \<open>
   INDUCT "LEAST n. \<exists>xs \<in>L. n = length xs" arbitrary: L
     HAVE "[] \<in> L" END WITH LeastI[of "\<lambda>n. \<exists>xs\<in>L. n = length xs"]
     HAVE "?P L []" END
-  NEXT
+  NEXT VARS n
     LET ?EX = "\<lambda>n. \<exists>xs\<in>L. n = length xs"
-    
+    CONSIDER x xs where "x#xs \<in> L" "size xs = n" END
+    HAVE "[] \<notin> L" END WITH Suc.hyps(2)
+      CASE_SPLIT "\<forall>xs \<in> L. \<exists>ys. xs = x#ys"
+      LET ?L = "{ys. x#ys \<in> L}"
+      HAVE 1: "(LEAST n. \<exists>xs \<in> ?L. n = length xs) = n" END
+      HAVE 2: "?L \<noteq> {}" END
+      CONSIDER ps where "?P ?L ps" END WITH Suc.hyps(1)[OF 1[symmetric] 2]
+        HAVE "\<forall>qs. (\<forall>qs. (\<forall>xa. x # xa \<in> L \<longrightarrow> prefix qs xa) \<longrightarrow> length qs \<le> length ps)
+                \<longrightarrow> (\<forall>xs\<in>L. prefix qs xs)
+                \<longrightarrow> length qs \<le> Suc (length ps)"
+          CRUSH
+          HAVE "length (tl qs) \<le> length ps" END
+        END
+      HAVE "?P L (x#ps)" END
+    NEXT
+      CONSIDER y ys where "x\<noteq>y" "y#ys \<in> L" END
+      HAVE "\<forall>qs. (\<forall>xs\<in>L. prefix qs xs) \<longrightarrow> qs = []" END
+      HAVE "?P L []" END
+  END
 \<close>)
 
-thm LeastI
-
-proof(induction "LEAST n. \<exists>xs \<in>L. n = length xs" arbitrary: L)
-  case 0
-  have "[] \<in> L" using "0.hyps" LeastI[of "\<lambda>n. \<exists>xs\<in>L. n = length xs"] \<open>L \<noteq> {}\<close>
-    by auto
-  hence "?P L []" by(auto)
-  thus ?case ..
-next
-  case (Suc n)
-  let ?EX = "\<lambda>n. \<exists>xs\<in>L. n = length xs"
-  obtain x xs where xxs: "x#xs \<in> L" "size xs = n" using Suc.prems Suc.hyps(2)
-    by(metis LeastI_ex[of ?EX] Suc_length_conv ex_in_conv)
-  hence "[] \<notin> L" using Suc.hyps(2) by auto
-  show ?case
-  proof (cases "\<forall>xs \<in> L. \<exists>ys. xs = x#ys")
-    case True
-    let ?L = "{ys. x#ys \<in> L}"
-    have 1: "(LEAST n. \<exists>xs \<in> ?L. n = length xs) = n"
-      using xxs Suc.prems Suc.hyps(2) Least_le[of "?EX"]
-      by - (rule Least_equality, fastforce+)
-    have 2: "?L \<noteq> {}" using \<open>x # xs \<in> L\<close> by auto
-    from Suc.hyps(1)[OF 1[symmetric] 2] obtain ps where IH: "?P ?L ps" ..
-    { fix qs
-      assume "\<forall>qs. (\<forall>xa. x # xa \<in> L \<longrightarrow> prefix qs xa) \<longrightarrow> length qs \<le> length ps"
-      and "\<forall>xs\<in>L. prefix qs xs"
-      hence "length (tl qs) \<le> length ps"
-        by (metis Cons_prefix_Cons hd_Cons_tl list.sel(2) Nil_prefix) 
-      hence "length qs \<le> Suc (length ps)" by auto
-    }
-    hence "?P L (x#ps)" using True IH by auto
-    thus ?thesis ..
-  next
-    case False
-    then obtain y ys where yys: "x\<noteq>y" "y#ys \<in> L" using \<open>[] \<notin> L\<close>
-      by (auto) (metis list.exhaust)
-    have "\<forall>qs. (\<forall>xs\<in>L. prefix qs xs) \<longrightarrow> qs = []" using yys \<open>x#xs \<in> L\<close>
-      by auto (metis Cons_prefix_Cons prefix_Cons)
-    hence "?P L []" by auto
-    thus ?thesis ..
-  qed
-qed
 
 lemma Longest_common_prefix_unique:
   \<open>\<exists>! ps. (\<forall>xs \<in> L. prefix ps xs) \<and> (\<forall>qs. (\<forall>xs \<in> L. prefix qs xs) \<longrightarrow> length qs \<le> length ps)\<close>

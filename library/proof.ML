@@ -8,6 +8,7 @@ type command = operation parser
 exception OPR_FAIL of string
 
 type with_clause = (bool (*with or without*) * string (*name*) * thm) list
+type opt_var_names = string option list option
 
 (* options *)
 
@@ -36,14 +37,12 @@ val UNFOLD_CMD : command
 
 val INDUCT : bool * ((binding option * (term * bool)) option list list *
               (((string * typ) list list * term option list) * thm list option))
+          -> opt_var_names
           -> state -> state
 val INDUCT_CMD : command
 
-val CASE_SPLIT : bool * (term option list list * thm option) -> operation
+val CASE_SPLIT : bool * (term option list list * thm option) -> opt_var_names -> operation
 val CASE_SPLIT_CMD : command
-
-val CASE : Sledgehammer.fact_override -> (string * string option list) option -> operation
-val CASE_CMD : command
 
 val record_history : string -> operation
 val restore_history : string -> operation
@@ -66,7 +65,7 @@ val HAMMER_CMD : command
 val END : Sledgehammer.fact_override -> operation
 val END_CMD : command
 
-val NXT : Sledgehammer.fact_override -> operation
+val NXT : opt_var_names -> Sledgehammer.fact_override -> operation
 val NXT_CMD : command
 
 val LET : (term list * term) list -> operation
@@ -107,7 +106,7 @@ datatype tree = PROP  of pctxt * term (*goal*)
               | BUNDL of pctxt * tree list
 
 type param = exn
-datatype endblk_type = T_END | T_NXT | T_CASE
+datatype endblk_type = T_END | T_NXT
 datatype frame = HHF   of thm (*a local_facts bundle node, represented as a Hereditary Harrop Formula*)
                         * pctxt
                | MAGIC of (Proof.context -> thm * pctxt * frame list * param -> Proof.context * frame list)
@@ -491,7 +490,8 @@ fun CONTEXTUAL_CMD (parser : Proof.context -> command)
 
 
 val INTRO = OPR o INTRO'
-val VARS = (Parse.$$$ "VARS" || Parse.$$$ "vars") |-- Scan.repeat Parse.binding
+val VARS_KWD = (Parse.$$$ "VARS" || Parse.$$$ "vars")
+val VARS = VARS_KWD |-- Scan.repeat Parse.binding
 val VARS_FOR_SINGLE_GOAL = Scan.option VARS >> SINGLE_GOAL
 val IN = (Parse.$$$ "IN" || Parse.$$$ "in")
 
@@ -620,9 +620,15 @@ val CRUSH_CMD =
 
 (* INDUCT & CASE *)
 
-exception CASE_NAME of (string * string option list) option
+type opt_var_names = string option list option
+exception CASE_NAME of opt_var_names
 
-fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
+fun map2_opt _ [] [] = []
+  | map2_opt f [] (y :: ys) = f NONE y :: map2_opt f [] ys
+  | map2_opt f (x :: xs) (y :: ys) = f x y :: map2_opt f xs ys
+  | map2_opt _ _ _ = raise ListPair.UnequalLengths
+
+fun CASES' ADDITIONAL_NOTES tac first_vars (SK as (ctxt0, HHF (st00, _) :: _)) =
   apply' tac NONE SK |> (fn (ctxt, SK as HHF (rule, pctxt0) :: REMAIN_SK) =>
    let val cases = Proof_Context.dest_cases (SOME ctxt0) ctxt
        val used_qualifiers = quanlifiers_of (print_stack SK)
@@ -643,19 +649,17 @@ fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
         let val opt_case_name = case param of CASE_NAME param => param
                                             | NO_PARAM => NONE
                                             | _ => raise BROKEN_INVARIANT
-            val name = case opt_case_name
-                         of SOME (name, _) => name
-                          | _ => if Char.isAlpha (String.sub (name, 0)) then name
-                                 else "case_" ^ name
+            val name = if Char.isAlpha (String.sub (name, 0)) then name
+                       else "case_" ^ name
             val kase = case kase
                   of Rule_Cases.Case {fixes, assumes, binds, cases} =>
                      Rule_Cases.Case {
                        fixes = (
                          case opt_case_name
-                           of SOME (_, fixes') =>
-                              map2 (fn NONE => I
-                                     | SOME name => fn (_, T) => (Binding.name name, T)
-                                   ) fixes' fixes
+                           of SOME fixes' =>
+                              map2_opt (fn NONE => I
+                                         | SOME name => fn (_, T) => (Binding.name name, T)
+                                       ) fixes' fixes
                             | _ => fold_map (fn (B,T) => fn names =>
                               let val name = Binding.name_of B
                                   val name = if Name.is_internal name then Name.dest_internal name
@@ -717,19 +721,16 @@ fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
                  :: MAGIC (CB false rule' remaining_cases, K I, NO_PARAM)
                  :: SK)
          else rpair ( HHF (goal, pctxt')
-                 :: ENDBLK T_CASE
+                 :: ENDBLK T_NXT
                  :: MAGIC (CB false rule' remaining_cases, K I, NO_PARAM)
                  :: SK)
         end )
         end
         end
-    in (ctxt, HHF (trivial_goal, ([],[]))
-           :: ENDBLK T_CASE
-           :: MAGIC (CB true rule cases, K I, CASE_NAME NONE)
-           :: REMAIN_SK)
+    in CB true rule cases ctxt (Drule.dummy_thm, ([],[]), REMAIN_SK, CASE_NAME first_vars)
    end
      | _ => raise BROKEN_INVARIANT)
-  | CASES' _ _ _ = raise BROKEN_INVARIANT
+  | CASES' _ _ _ _ = raise BROKEN_INVARIANT
 
 (* Syntax *)
 
@@ -798,7 +799,7 @@ fun case_synt ctxt toks = case case_synt' (ctxt, toks) of (x, (_, toks)) => (x,t
 
 in
 
-fun INDUCT' (no_simp, (insts, ((arbitrary, taking), opt_rule))) (ctxt, SK) =
+fun INDUCT' (no_simp, (insts, ((arbitrary, taking), opt_rule))) first_vars (ctxt, SK) =
   let val (_, facts, _) = collect_context (print_stack SK)
       val facts = map (fn (name, _) => (name, Proof_Context.get_thms ctxt name)) facts
       
@@ -832,7 +833,7 @@ fun INDUCT' (no_simp, (insts, ((arbitrary, taking), opt_rule))) (ctxt, SK) =
             val tamper_facts'' = burrow tamper_facts ths
          in map (fn (B,ths) => ((mk_binding B, []), [(ths,[])]) ) tamper_facts''
         end
-   in CASES' (maps o update_tampered) tac (ctxt, SK)
+   in CASES' (maps o update_tampered) tac first_vars (ctxt, SK)
   end
 
 fun CASE_SPLIT' (no_simp, (insts, opt_rule)) =
@@ -840,17 +841,19 @@ fun CASE_SPLIT' (no_simp, (insts, opt_rule)) =
    in CASES' (K (K [])) tac
   end
 
-val INDUCT = OPR o INDUCT'
-val INDUCT_CMD = CONTEXTUAL_CMD (fn ctxt =>
-         ind_synt (Context.Proof ctxt)
-      >> (fn (no_simp, (insts, ((arbitrary, taking), opt_rule))) =>
-          INDUCT (no_simp, (insts, ((arbitrary, taking), opt_rule))) ))
+val OPT_VARS = Scan.option (VARS_KWD |-- Scan.repeat (Parse.maybe Parse.name))
 
-val CASE_SPLIT = OPR o CASE_SPLIT'
+val INDUCT = OPR oo INDUCT'
+val INDUCT_CMD = CONTEXTUAL_CMD (fn ctxt =>
+         ind_synt (Context.Proof ctxt) -- OPT_VARS
+      >> (fn ((no_simp, (insts, ((arbitrary, taking), opt_rule))), vars) =>
+          INDUCT (no_simp, (insts, ((arbitrary, taking), opt_rule))) vars ))
+
+val CASE_SPLIT = OPR oo CASE_SPLIT'
 val CASE_SPLIT_CMD = CONTEXTUAL_CMD (fn ctxt =>
-         case_synt (Context.Proof ctxt)
-      >> (fn (no_simp, (insts, opt_rule)) =>
-          CASE_SPLIT (no_simp, (insts, opt_rule))) )
+         case_synt (Context.Proof ctxt) -- OPT_VARS
+      >> (fn ((no_simp, (insts, opt_rule)), vars) =>
+          CASE_SPLIT (no_simp, (insts, opt_rule)) vars) )
 
 end
 
@@ -1189,23 +1192,21 @@ val HAMMER_CMD = orverride_parser >> HAMMER
 
 (* END *)
 
-fun END' SH_override T param jj ID (stack as (_, HHF _ :: _)) =
+fun END' param SH_override T jj ID (stack as (_, HHF _ :: _)) =
   let val ID_BASE = if jj = 0 then string_of_int ID 
                     else string_of_int ID ^ "+" ^ string_of_int jj
       val (ctxt, SK'1) = HAMMER_all SH_override ID_BASE stack
    in case SK'1
    of HHF s :: ENDBLK T' :: SK' =>
-        if T = T_CASE andalso T' = T_CASE
+        if T = T_NXT andalso T' = T_NXT
         then (case SK'
           of MAGIC (CB, PRT, _) :: SK'' =>
               maintain (ctxt, HHF s :: MAGIC (CB, PRT, param) :: SK'')
-           | _ => raise BROKEN_INVARIANT )
+           | _ => maintain (ctxt, HHF s :: SK') )
         else if T = T' then maintain (ctxt, HHF s :: SK')
-        else if T = T_END
-                andalso (T' = T_NXT orelse T' = T_CASE)
-                andalso Config.get ctxt END_completes_all_NEXT
+        else if T = T_END andalso T' = T_NXT andalso Config.get ctxt END_completes_all_NEXT
         then maintain (ctxt, HHF s :: SK')
-          |> END' SH_override T_END param (jj+1) ID
+          |> END' param SH_override T_END (jj+1) ID
         else raise OPR_FAIL (
                 "This block should be closed by the " ^
                 (case T' of T_END => "END" | T_NXT => "NEXT" | T_CASE => "CASE") ^
@@ -1214,16 +1215,10 @@ fun END' SH_override T param jj ID (stack as (_, HHF _ :: _)) =
   end
   | END' _ _ _ _ _ _ = raise BROKEN_INVARIANT
 
-fun END SH_override = OPR_ID (END' SH_override T_END NO_PARAM 0)
-fun NXT SH_override = OPR_ID (END' SH_override T_NXT NO_PARAM 0)
-fun CASE SH_override binds = OPR_ID (END' SH_override T_CASE (CASE_NAME binds) 0)
+fun END SH_override = OPR_ID (END' NO_PARAM SH_override T_END 0)
+fun NXT param SH_override = OPR_ID (END' (CASE_NAME param) SH_override T_NXT 0)
 val END_CMD  = orverride_parser >> END
-val NXT_CMD  = orverride_parser >> NXT
-val CASE_CMD = Scan.option 
-               ( Parse.name >> rpair []
-              || \<^keyword>\<open>(\<close> |-- Parse.name -- Scan.repeat (Parse.maybe Parse.name) --| \<^keyword>\<open>)\<close> )
-            >> CASE Sledgehammer_Fact.no_fact_override
- 
+val NXT_CMD  = OPT_VARS -- orverride_parser >> uncurry NXT 
 
 (* LET *)
 
@@ -1357,8 +1352,7 @@ val CMDS = Symtab.make [
       ("APPLY",   APPLY_CMD),
       ("apply",   APPLY_CMD),
       ("UNFOLD",  UNFOLD_CMD),
-      ("CHOOSE",  CHOOSE_CMD),
-      ("CASE"  ,  CASE_CMD)
+      ("CHOOSE",  CHOOSE_CMD)
     ]
 
 val keywords = let open Keyword
@@ -1400,7 +1394,6 @@ val keywords = let open Keyword
            (("CONSIDER",\<^here>),command_spec (prf_asm_goal, [])),
            (("HAVE",  \<^here>), command_spec (prf_goal, [])),
            (("CASE_SPLIT",  \<^here>), command_spec (prf_goal, [])),
-           (("CASE",  \<^here>), command_spec (prf_goal, [])),
            (("INDUCT",\<^here>), command_spec (prf_goal, [])),
            (("CRUSH", \<^here>), command_spec (prf_goal, [])),
            (("INTRO",\<^here>), command_spec (prf_goal, [])),
