@@ -103,12 +103,16 @@ type pctxt = variables * local_facts
 datatype tree = PROP  of pctxt * term (*goal*)
               | BUNDL of pctxt * tree list
 
-datatype endblk_type = T_END | T_NXT
+type param = exn
+datatype endblk_type = T_END | T_NXT | T_CASE
 datatype frame = HHF   of thm (*a local_facts bundle node, represented as a Hereditary Harrop Formula*)
                         * pctxt
-               | MAGIC of (Proof.context -> thm * pctxt * frame list -> Proof.context * frame list)
-                        * (tree -> tree)
+               | MAGIC of (Proof.context -> thm * pctxt * frame list * param -> Proof.context * frame list)
+                        * (param -> tree -> tree)
+                        * param
                | ENDBLK of endblk_type
+
+exception NO_PARAM
 
 type stack = Proof.context * (frame list)
   (*invariant: the head must be an HHF*)
@@ -352,8 +356,8 @@ fun maintain (c,[]) = (c,[])
             of [] => origin
              | (HHF (st1, pctxt') :: L') =>
                   maintain (ctxt, HHF (MP ctxt st1 st, cat_pctxt pctxt pctxt') :: L')
-             | (MAGIC (cb,_) :: L') =>
-                  (case cb ctxt (st, pctxt, L') of (ctxt', S) => maintain (ctxt', S) )
+             | (MAGIC (cb,_,param) :: L') =>
+                  (case cb ctxt (st, pctxt, L', param) of (ctxt', S) => maintain (ctxt', S) )
              | ENDBLK _ :: _ => origin )
          | _ => origin)
   | maintain (_, MAGIC _ :: _) = raise BROKEN_INVARIANT
@@ -406,15 +410,15 @@ fun INTRO'' F mode (origin as (ctxt, HHF (st0, pctxt) :: L)) =
                                                        |> SOME
                                                 | some => some))
                                           st
-                       val PRT = prepend_print pctxt
-                               o prepend_print (map (
+                       val PRT = K (prepend_print pctxt
+                                  o prepend_print (map (
                                          snd
                                       #> Thm.term_of
                                       #> Term.dest_Free
                                       #> apfst (Variable.revert_fixed (#context foc)
-                                   )) (#params foc), [])
+                                   )) (#params foc), []) )
                        val (st'', (pctxt', ctxt')) = F (st', foc)
-                       fun CB ctxt'' (st'',_,S) =
+                       fun CB ctxt'' (st'',_,S,_) =
                         let val st'3 = singleton (Proof_Context.export ctxt'' ctxt') st''
                          in (ctxt, HHF (
                                    Subgoal.retrofit ctxt'' ctxt (#params foc) (#asms foc) 1 st'3 st
@@ -423,8 +427,8 @@ fun INTRO'' F mode (origin as (ctxt, HHF (st0, pctxt) :: L)) =
                          |> mode = ALL_SUBGOALS ? INTRO'' F mode
                         end
                     in if Thm.nprems_of st0 > 1
-                    then (ctxt', HHF (st'', pctxt') :: ENDBLK T_NXT :: MAGIC (CB,PRT) :: L)
-                    else (ctxt', HHF (st'', pctxt') :: MAGIC (CB,PRT) :: L)
+                    then (ctxt', HHF (st'', pctxt') :: ENDBLK T_NXT :: MAGIC (CB,PRT,NO_PARAM) :: L)
+                    else (ctxt', HHF (st'', pctxt') :: MAGIC (CB,PRT,NO_PARAM) :: L)
                    end
               else (ctxt, HHF (st0, pctxt) :: L)
     )
@@ -499,7 +503,7 @@ fun print_stack [] = PROP (([], []), SOLVED_GOAL)
                     val nodes = map (fn goal => PROP (([],[]), goal)) goals
                  in prt (BUNDL (pctxt, t::nodes)) L
                 end
-            | prt t (MAGIC (_, PRT) :: L) = prt (PRT t) L
+            | prt t (MAGIC (_, PRT, param) :: L) = prt (PRT param t) L
             | prt t (ENDBLK _ :: L) = prt t L
           fun prt0 (HHF (st, pctxt)) = PROP (pctxt, Thm.prop_of st)
             | prt0 _ = raise BROKEN_INVARIANT
@@ -615,7 +619,7 @@ fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
        val cases = Name.variant_list used_qualifiers (map #1 cases)
                 ~~ map #2 cases
        fun CB initial rule cases
-              ctxt' (lem, _, SK) =
+              ctxt' (lem, _, SK, _) =
         let val rule' =
                 if initial then rule
                 else lem
@@ -687,16 +691,16 @@ fun CASES' ADDITIONAL_NOTES tac (SK as (ctxt0, HHF (st00, _) :: _)) =
         let val pctxt' = (map (apfst Binding.name_of) fixes, map (apsnd (map Thm.prop_of)) thms)
          in if null remaining_cases
          then rpair ( HHF (goal, pctxt')
-                 :: MAGIC (CB false rule' remaining_cases, I)
+                 :: MAGIC (CB false rule' remaining_cases, K I, NO_PARAM)
                  :: SK)
          else rpair ( HHF (goal, pctxt')
                  :: ENDBLK T_NXT
-                 :: MAGIC (CB false rule' remaining_cases, I)
+                 :: MAGIC (CB false rule' remaining_cases, K I, NO_PARAM)
                  :: SK)
         end )
         end
         end
-    in CB true rule cases ctxt (Drule.dummy_thm, ([],[]), REMAIN_SK)
+    in CB true rule cases ctxt (Drule.dummy_thm, ([],[]), REMAIN_SK, NO_PARAM)
    end
      | _ => raise BROKEN_INVARIANT)
   | CASES' _ _ _ = raise BROKEN_INVARIANT
@@ -858,7 +862,7 @@ fun HAVE' _ _ (ctxt, []) = (ctxt, [])
                                  end)
           val goal_term = Syntax.read_prop ctxt expr
           val goal = Goal.init (Thm.cterm_of ctxt goal_term)
-          fun CB ctxt' (st',(*pctxt'*) _,S) =
+          fun CB ctxt' (st',(*pctxt'*) _,S, _) =
             let val lems = Goal.conclude st'
                         |> singleton (Proof_Context.export ctxt' ctxt)
                         |> elim_conjs ctxt
@@ -866,8 +870,8 @@ fun HAVE' _ _ (ctxt, []) = (ctxt, [])
                         Proof_Context.note_thms "" (name, [(lems,[])]) ctxt
              in (ctxt'', HHF (G, cat_pctxt ([], [(name, map Thm.prop_of lems)]) pctxt) :: S)
             end
-          fun PRT t = BUNDL (pctxt, [t, print_stack [HHF (G,([],[]))]])
-       in (ctxt, HHF (goal, ([],[])) :: ENDBLK T_END :: MAGIC (CB, PRT) :: S)
+          fun PRT _ t = BUNDL (pctxt, [t, print_stack [HHF (G,([],[]))]])
+       in (ctxt, HHF (goal, ([],[])) :: ENDBLK T_END :: MAGIC (CB, PRT, NO_PARAM) :: S)
       end
   | HAVE' _ _ _ = raise BROKEN_INVARIANT
 
@@ -1028,11 +1032,11 @@ fun CONSIDER' raw_dnf (ctxt0, HHF (st0, pctxt0) :: S) =
                                       @ map (apsnd Term.fastype_of) fixes,
                                      map (Binding.name_of o fst) binders ~~
                                         (unflat raw_props (map Thm.term_of AS)) ))] ) conj_clauses
-      fun PRT0 sgs t = BUNDL (pctxt0, t :: sgs)
+      fun PRT0 sgs _ t = BUNDL (pctxt0, t :: sgs)
       fun CB _ _ [] _  _ = raise BROKEN_INVARIANT
         | CB initial sgs
              ((cparams, _, (decls, fixes, AS, raw_props, binds, binders), _) :: remain_clauses)
-             ctxt' (lem, _, S) =
+             ctxt' (lem, _, S, _) =
             let val rule' = lem
                          |> Goal.conclude
                          |> singleton (Proof_Context.export ctxt' ctxt0)
@@ -1061,14 +1065,16 @@ fun CONSIDER' raw_dnf (ctxt0, HHF (st0, pctxt0) :: S) =
                           :: (case remain_clauses
                                 of [] => S
                                  |  _ =>    ENDBLK T_NXT
-                                         :: MAGIC (CB false (tl sgs) remain_clauses, PRT0 (tl sgs))
+                                         :: MAGIC (CB false (tl sgs) remain_clauses,
+                                                   PRT0 (tl sgs),
+                                                   NO_PARAM)
                                          :: S))
             end
 
    in (ctxt_rule,
           HHF (goal,([],[]))
        :: ENDBLK (case conj_clauses of [_] => T_END | _ => T_NXT)
-       :: MAGIC (CB true subgoals conj_clauses, PRT0 subgoals) :: S)
+       :: MAGIC (CB true subgoals conj_clauses, PRT0 subgoals, NO_PARAM) :: S)
   end
   | CONSIDER' _ _ = raise BROKEN_INVARIANT
 
