@@ -6,6 +6,10 @@ begin
 
 declare [[ML_debugger, ML_exception_trace]]
 
+thm HOL.simp_thms
+thm option.splits
+thm if_split_asm if_split case_split
+
 definition \<open>TAG X \<equiv> X\<close>
 
 ML_file \<open>./library/proof.ML\<close>

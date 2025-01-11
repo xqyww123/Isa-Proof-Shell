@@ -290,7 +290,7 @@ proof (induction "length (xs @ ys) + length xs" arbitrary: xs ys rule: less_indu
 qed
 
 
-   
+    
 lemma polyfun_extremal_lemma': 
     fixes c :: "nat \<Rightarrow> 'a::real_normed_div_algebra"
   assumes "0 < e"
@@ -300,7 +300,7 @@ INDUCT n
 NEXT
 CONSIDER M where "\<And>z. M \<le> norm z \<Longrightarrow> norm (\<Sum>i\<le>n. c i * z^i) \<le> e * norm z ^ Suc n" END
 RULE exI [where x= "max M (1 + norm(c(Suc n)) / e)"]
-CRUSH
+CRUSH WITHOUT power_Suc
 HAVE "e + norm (c (Suc n)) \<le> e * norm z"
   END WITH \<open>1 + norm (c (Suc n)) / e \<le> norm z\<close>
 HAVE "norm (\<Sum>i\<le>n. c i * z^i) \<le> e * norm z ^ Suc n" END
@@ -422,5 +422,16 @@ lemma
   END
 \<close>)
 
+
+definition \<open>XXX a \<equiv> a\<close>
+
+lemma \<open>XXX a = XXX (XXX a)\<close>
+  by (min_script \<open>UNFOLD XXX_def END\<close>)
+
+lemma \<open>XXX a = XXX (XXX a)\<close>
+  by (min_script \<open>CRUSH WITH XXX_def PRINT END\<close>)
+
+lemma \<open>XXX a = XXX (XXX a)\<close>
+  by (min_script \<open>END WITH XXX_def\<close>)
 
 end

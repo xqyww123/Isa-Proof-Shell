@@ -7,6 +7,8 @@ type command = operation parser
 
 exception OPR_FAIL of string
 
+type with_clause = (bool (*with or without*) * string (*name*) * thm) list
+
 (* options *)
 
 val atomize_goals : bool Config.T
@@ -26,7 +28,7 @@ val apply_method : Method.method -> Time.time option -> stack -> stack
 val APPLY_CMD : command
 
 val crush_timeout : int Config.T
-val CRUSH : intros_mode -> operation
+val CRUSH : intros_mode * with_clause -> operation
 val CRUSH_CMD : command
 
 val UNFOLD : thm list -> operation
@@ -84,6 +86,8 @@ end
 
 structure IPS_Proof : IPS_PROOF = struct
 
+(** Preliminaries **)
+
 val assm_N = "assm"
 fun assm_name i = assm_N ^ string_of_int i
 
@@ -120,7 +124,7 @@ exception BROKEN_INVARIANT
 
 exception OPR_FAIL of string
 
-(** Helpers **)
+(* Helpers *)
 
 fun is_protected (\<^Const>\<open>Pure.prop\<close> $ _) = true
   | is_protected (\<^Const>\<open>Pure.imp\<close> $ _ $ X) = is_protected X
@@ -136,6 +140,35 @@ fun mk_binding long_name =
    of "local"::L => mk L
     | L => mk L
   end
+
+(* Common Syntax *)
+
+type with_clause = (bool (*with or without*) * string (*name*) * thm) list
+
+val with_parser =
+        Scan.repeat (   ((Parse.$$$ "WITH"    >> K true ) -- Scan.repeat Parse.thm  )
+                     || ((Parse.$$$ "WITHOUT" >> K false) --  Scan.repeat Parse.thm ) )
+     >> maps (uncurry (map o pair))
+
+val orverride_parser =
+        Scan.repeat (   (Parse.$$$ "WITH"    |-- Scan.repeat Parse.thm >> rpair [])
+                     || (Parse.$$$ "WITHOUT" |-- Scan.repeat Parse.thm >>  pair []) )
+     >> (fn LL => fold_rev (fn (A,D) => fn (A',D') => (A @ A', D @ D') ) LL ([],[])
+               |> (fn (A,D) => {add = A, del = D, only = false}))
+
+fun name_of_ref (Facts.Named ((name,_), _)) = name
+  | name_of_ref (Facts.Fact _) = ""
+
+fun read_with ctxt with_lems =
+      maps (fn (flag, fact) =>
+        let val name = name_of_ref (fst fact)
+         in Attrib.eval_thms ctxt [fact]
+         |> map (fn th => (flag, name, th) )
+        end ) with_lems
+
+fun apply_WITH with_lems ctxt =
+  fold (fn (flag, name, thm) =>
+    Context.proof_map (Phi_Sledgehammer_Solver.with_rule flag name thm)) with_lems
 
 (** Basic Operations **)
 
@@ -547,9 +580,11 @@ val UNFOLD_CMD = Parse.thms1 -- Scan.option (IN |-- Scan.repeat1 Parse.name) >> 
 
 val crush_timeout = Attrib.setup_config_int \<^binding>\<open>crush_timeout\<close> (K 10) (*in seconds*)
 
-fun CRUSH' _ (ctxt, []) = (ctxt, [])
-  | CRUSH' imode (s as (ctxt, _)) =
-  let val time = Config.get ctxt crush_timeout
+fun CRUSH' _ _ (ctxt, []) = (ctxt, [])
+  | CRUSH' prep_with (imode, raw_with_lems) (s as (ctxt, _)) =
+  let val with_lems = prep_with ctxt raw_with_lems
+      val ctxt = apply_WITH with_lems ctxt ctxt
+      val time = Config.get ctxt crush_timeout
               |> Time.fromSeconds
    in
    (( raw_apply (CONTEXT_TACTIC (Clasimp.auto_tac ctxt)) (SOME time) s
@@ -564,9 +599,12 @@ fun CRUSH' _ (ctxt, []) = (ctxt, [])
    |> SKIP_SUCCESS (INTRO' imode)
   end
 
-val CRUSH = OPR o CRUSH'
+val CRUSH = OPR o (CRUSH' (K I))
 
-val CRUSH_CMD = Scan.optional (VARS >> (SINGLE_GOAL o SOME)) ALL_SUBGOALS >> CRUSH
+val CRUSH_CMD =
+      ( Scan.optional (VARS >> (SINGLE_GOAL o SOME)) ALL_SUBGOALS
+     -- with_parser )
+     >> (OPR o CRUSH' read_with)
 
 (* INDUCT & CASE *)
 
@@ -1108,13 +1146,6 @@ fun HAMMER_all override step_id =
         | loop _ _ = raise BROKEN_INVARIANT
    in loop 0
   end
-
-val orverride_parser =
-        Scan.repeat (   (Parse.$$$ "WITH"    |-- Scan.repeat Parse.thm >> rpair [])
-                     || (Parse.$$$ "WITHOUT" |-- Scan.repeat Parse.thm >>  pair []) )
-     >> (fn LL => fold_rev (fn (A,D) => fn (A',D') => (A @ A', D @ D') ) LL ([],[])
-               |> (fn (A,D) => {add = A, del = D, only = false}))
-
 
 fun HAMMER override = OPR_ID (HAMMER_i override o string_of_int)
 val HAMMER_CMD = orverride_parser >> HAMMER
