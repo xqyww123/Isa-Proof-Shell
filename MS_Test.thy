@@ -1,7 +1,7 @@
 theory MS_Test
   imports Main Proof_Shell HOL.Transcendental HOL.Groups_Big
 begin
-
+ 
        
 lemma \<open>0 < length x \<Longrightarrow> x \<noteq> []\<close>
   by (min_script \<open>CASE_SPLIT x PRINT END\<close>)
@@ -299,15 +299,15 @@ lemma polyfun_extremal_lemma':
 INDUCT n
 NEXT
 CONSIDER M where "\<And>z. M \<le> norm z \<Longrightarrow> norm (\<Sum>i\<le>n. c i * z^i) \<le> e * norm z ^ Suc n" END
-RULE exI [where x= "max M (1 + norm(c(Suc n)) / e)"]
-CRUSH WITHOUT power_Suc
-HAVE "e + norm (c (Suc n)) \<le> e * norm z"
-  END WITH \<open>1 + norm (c (Suc n)) / e \<le> norm z\<close>
+CHOOSE "max M (1 + norm(c(Suc n)) / e)"
+CRUSH
+HAVE "e + norm (c (Suc n)) \<le> e * norm z" END WITH \<open>1 + norm (c (Suc n)) / e \<le> norm z\<close>
 HAVE "norm (\<Sum>i\<le>n. c i * z^i) \<le> e * norm z ^ Suc n" END
 HAVE "norm (\<Sum>i\<le>n. c i * z^i) + norm (c (Suc n) * z ^ Suc n) \<le> e * norm z ^ Suc n + norm (c (Suc n) * z ^ Suc n)" END
-HAVE "norm ((\<Sum>i\<le>n. c i * z^i) + c (Suc n) * z ^ Suc n) \<le> e * norm z ^ Suc n + norm (c (Suc n) * z ^ Suc n)" END
-HAVE "e * norm z ^ Suc n + norm (c (Suc n) * z ^ Suc n) \<le> (e + norm (c (Suc n))) * norm z ^ Suc n"  END
-HAVE "(e + norm (c (Suc n))) * norm z ^ Suc n \<le> e * norm z * norm z ^ Suc n" END
+HAVE "norm ((\<Sum>i\<le>n. c i * z^i) + c (Suc n) * z ^ Suc n)
+    \<le> e * norm z ^ Suc n + norm (c (Suc n) * z ^ Suc n)
+    \<le> (e + norm (c (Suc n))) * norm z ^ Suc n
+    \<le> e * norm z * norm z ^ Suc n" END
 END
 \<close>)
 
@@ -346,69 +346,6 @@ next
       by simp
   qed
 qed
-
-no_notation
-  less_eq  ("'(\<le>')") and
-  less_eq  ("(_/ \<le> _)"  [51, 51] 50) and
-  less  ("'(<')") and
-  less  ("(_/ < _)"  [51, 51] 50)
-
-notation
-  less_eq  ("'(\<le>')") and
-  less_eq  ("(_/ \<le> _)"  [50, 51] 50) and
-  less  ("'(<')") and
-  less  ("(_/ < _)"  [50, 51] 50)
-
-
-term \<open>a \<le> b\<close>
-
-translations
-  "a \<le> b \<le> c" => "a \<le> b \<and> b \<le> c"
-  "a < b < c" => "a < b \<and> b < c"
-  "a = b = c" => "a = b \<and> b = c"
-  "a \<longleftrightarrow> b \<longleftrightarrow> c" => "(a \<longleftrightarrow> b) \<and> (b \<longleftrightarrow> c)"
-
-term \<open>a \<le> b \<le> c\<close>
-term \<open>a < b < c\<close>
-term \<open>a = b = c\<close>
-term \<open>a = b \<longleftrightarrow> c = d\<close>
-term \<open>a \<longleftrightarrow> b \<longleftrightarrow> c \<longleftrightarrow> d\<close>
-
-lemma polyfun_extremal_lemma'': 
-    fixes c :: "nat \<Rightarrow> 'a::real_normed_div_algebra"
-  assumes "0 < e"
-    shows "\<exists>M. \<forall>z. M \<le> norm(z) \<longrightarrow> norm (\<Sum>i\<le>n. c(i) * z^i) \<le> e * norm(z) ^ (Suc n)"
-  by (min_script \<open>
-INDUCT n
-NEXT
-CONSIDER M where "\<And>z. M \<le> norm z \<Longrightarrow> norm (\<Sum>i\<le>n. c i * z^i) \<le> e * norm z ^ Suc n" END
-CHOOSE "max M (1 + norm(c(Suc n)) / e)"
-CRUSH
-HAVE "e + norm (c (Suc n)) \<le> e * norm z" END WITH \<open>1 + norm (c (Suc n)) / e \<le> norm z\<close>
-HAVE "norm (\<Sum>i\<le>n. c i * z^i) \<le> e * norm z ^ Suc n" END
-HAVE "norm (\<Sum>i\<le>n. c i * z^i) + norm (c (Suc n) * z ^ Suc n) \<le> e * norm z ^ Suc n + norm (c (Suc n) * z ^ Suc n)" END
-HAVE "norm ((\<Sum>i\<le>n. c i * z^i) + c (Suc n) * z ^ Suc n)
-    \<le> e * norm z ^ Suc n + norm (c (Suc n) * z ^ Suc n)
-    \<le> (e + norm (c (Suc n))) * norm z ^ Suc n
-    \<le> e * norm z * norm z ^ Suc n" END
-END
-\<close>)
-
-(*
-lemma comm_append_are_replicate':
-  "xs @ ys = ys @ xs \<Longrightarrow> \<exists>m n zs. concat (replicate m zs) = xs \<and> concat (replicate n zs) = ys"
-by (min_script \<open>
-  INDUCT "length (xs @ ys) + length xs" arbitrary: xs ys rule: less_induct
-  PRINT
-  CONSIDER "length ys < length xs" | "xs = []" | "length xs \<le> length ys \<and> xs \<noteq> []"
-  NEXT
-  NEXT
-    HAVE "concat (replicate 0 ys) = xs \<and> concat (replicate 1 ys) = ys" END
-  PRINT
-  NEXT
-    
-\<close>)
-*)
 
 lemma
   \<open>A \<Longrightarrow> B \<Longrightarrow> A \<and> B\<close>

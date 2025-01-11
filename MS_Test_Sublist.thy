@@ -1,7 +1,7 @@
 theory MS_Test_Sublist
   imports Main Proof_Shell
 begin
-
+ 
 subsection \<open>Prefix order on lists\<close>
 
 definition prefix :: "'a list \<Rightarrow> 'a list \<Rightarrow> bool"
@@ -541,18 +541,18 @@ definition suffix :: "'a list \<Rightarrow> 'a list \<Rightarrow> bool"
 
 definition strict_suffix :: "'a list \<Rightarrow> 'a list \<Rightarrow> bool"
   where "strict_suffix xs ys \<longleftrightarrow> suffix xs ys \<and> xs \<noteq> ys"
-
+ 
 global_interpretation suffix_order: ordering suffix strict_suffix
-  by standard (auto simp: suffix_def strict_suffix_def)
-
+  by (min_script \<open>END\<close>)
+ 
 interpretation suffix_order: order suffix strict_suffix
-  by standard (auto simp: suffix_def strict_suffix_def)
+  by (min_script \<open>END\<close>)
 
 global_interpretation suffix_bot: ordering_top \<open>\<lambda>xs ys. suffix ys xs\<close> \<open>\<lambda>xs ys. strict_suffix ys xs\<close> \<open>[]\<close>
-  by standard (simp add: suffix_def)
+  by (min_script \<open>END\<close>)
 
 interpretation suffix_bot: order_bot Nil suffix strict_suffix
-  by standard (simp add: suffix_def)
+  by (min_script \<open>END\<close>)
 
 lemma suffixI [intro?]: "ys = zs @ xs \<Longrightarrow> suffix xs ys"
   unfolding suffix_def by blast
@@ -587,7 +587,7 @@ lemma suffix_appendD: "suffix (zs @ xs) ys \<Longrightarrow> suffix xs ys"
   by (auto simp add: suffix_def)
 
 lemma strict_suffix_set_subset: "strict_suffix xs ys \<Longrightarrow> set xs \<subseteq> set ys"
-  by (auto simp: strict_suffix_def suffix_def)
+  by (min_script \<open>END\<close>)
 
 lemma set_mono_suffix: "suffix xs ys \<Longrightarrow> set xs \<subseteq> set ys"
 by (auto simp: suffix_def)
@@ -604,21 +604,19 @@ proof -
 qed
 
 lemma suffix_to_prefix [code]: "suffix xs ys \<longleftrightarrow> prefix (rev xs) (rev ys)"
-proof
-  assume "suffix xs ys"
-  then obtain zs where "ys = zs @ xs" ..
-  then have "rev ys = rev xs @ rev zs" by simp
-  then show "prefix (rev xs) (rev ys)" ..
-next
-  assume "prefix (rev xs) (rev ys)"
-  then obtain zs where "rev ys = rev xs @ zs" ..
-  then have "rev (rev ys) = rev zs @ rev (rev xs)" by simp
-  then have "ys = rev zs @ xs" by simp
-  then show "suffix xs ys" ..
-qed
-  
+by (min_script \<open>
+  CRUSH
+    CONSIDER zs where "ys = zs @ xs" END
+    HAVE "rev ys = rev xs @ rev zs" END
+  NEXT
+    CONSIDER zs where "rev ys = rev xs @ zs" END
+    HAVE "rev (rev ys) = rev zs @ rev (rev xs)" END
+    HAVE "ys = rev zs @ xs" END
+  END
+\<close>)
+
 lemma strict_suffix_to_prefix [code]: "strict_suffix xs ys \<longleftrightarrow> strict_prefix (rev xs) (rev ys)"
-  by (auto simp: suffix_to_prefix strict_suffix_def strict_prefix_def)
+  by (min_script \<open>END\<close>)
 
 lemma distinct_suffix: "distinct ys \<Longrightarrow> suffix xs ys \<Longrightarrow> distinct xs"
   by (clarsimp elim!: suffixE)
@@ -1358,19 +1356,15 @@ lemma sublist_butlast [simp, intro]: "sublist (butlast xs) xs"
   by (rule prefix_imp_sublist) (simp_all add: prefixeq_butlast)
     
 lemma sublist_rev [simp]: "sublist (rev xs) (rev ys) = sublist xs ys"
-proof
-  assume "sublist (rev xs) (rev ys)"
-  then obtain as bs where "rev ys = as @ rev xs @ bs"
-    by (auto simp: sublist_def)
-  also have "rev \<dots> = rev bs @ xs @ rev as" by simp
-  finally show "sublist xs ys" by simp
-next
-  assume "sublist xs ys"
-  then obtain as bs where "ys = as @ xs @ bs"
-    by (auto simp: sublist_def)
-  also have "rev \<dots> = rev bs @ rev xs @ rev as" by simp
-  finally show "sublist (rev xs) (rev ys)" by simp
-qed
+by (min_script \<open>
+  CRUSH
+    CONSIDER as bs where "rev ys = as @ rev xs @ bs" END
+    HAVE "rev (as @ rev xs @ bs) = rev bs @ xs @ rev as" END
+  NEXT
+    CONSIDER as bs where "ys = as @ xs @ bs" END
+    HAVE "rev (as @ xs @ bs) = rev bs @ rev xs @ rev as" END
+  END
+\<close>)
     
 lemma sublist_rev_left: "sublist (rev xs) ys = sublist xs (rev ys)"
   by (subst sublist_rev [symmetric]) (simp only: rev_rev_ident)

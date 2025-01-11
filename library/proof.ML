@@ -541,7 +541,7 @@ fun quanlifiers_of tree =
 
 
 (*fun INTRO_ALL (ctxt, HHF (st, facts) :: L) = *)
-  
+
 
 (* APPLY *)
 
@@ -587,6 +587,105 @@ val UNFOLD = OPR o UNFOLD' (K I)
 val UNFOLD_CMD = Parse.thms1 -- Scan.option (IN |-- Scan.repeat1 Parse.name) >> (
       fn (defs, NONE)       => OPR (UNFOLD' Attrib.eval_thms defs)
        | (defs, SOME facts) => OPR (UNFOLD_FACT' Attrib.eval_thms defs facts) )
+
+
+(* INIT PROCESS *)
+
+fun TRY_STANDARD (SK as (ctxt, HHF (st, _) :: _)) =
+ (let val thy = Proof_Context.theory_of ctxt
+      val [\<^Const>\<open>Trueprop\<close> $ goal] = Thm.prems_of st
+      val Const(name, _) = head_of goal
+      fun pass [] = []
+        | pass ["class", x] = [x]
+        | pass (h::L) = h :: pass L
+      fun qchk [] = false
+        | qchk ["class", _] = true
+        | qchk (_::L) = qchk L
+      val idts = Long_Name.explode name
+      val name' = if qchk idts then Long_Name.implode (pass idts) else name
+   in if Locale.defined thy name'
+    then apply' (CONTEXT_TACTIC (Classical.standard_tac ctxt [])) NONE SK
+    else SK
+  end handle Bind => SK )
+  | TRY_STANDARD _ = raise BROKEN_INVARIANT
+
+val INIT_PROCESS = TRY_STANDARD
+
+local
+(*
+fun read_trrules thy raw_rules =
+  let
+    val ctxt = Proof_Context.init_global thy;
+    val read_root =
+      #1 o dest_Type o Proof_Context.read_type_name {proper = true, strict = false} ctxt;
+  in
+    raw_rules
+    |> map (Syntax.map_trrule (fn (r, s) => Syntax_Phases.parse_ast_pattern ctxt (read_root r, s)))
+  end;
+
+val trrules = read_trrules \<^theory> [
+      Syntax.Parse_Rule (("logic", "(a \<le> b) \<le> c"), ("logic", "a \<le> b \<and> b \<le> c")),
+      Syntax.Parse_Rule (("logic", "(a < b) < c"), ("logic", "a < b \<and> b < c")),
+      Syntax.Parse_Rule (("logic", "a = b = c"), ("logic", "a = b \<and> b = c")),
+      Syntax.Parse_Rule (("logic", "a \<longleftrightarrow> b \<longleftrightarrow> c"), ("logic", "a \<longleftrightarrow> b \<and> b \<longleftrightarrow> c"))
+  ]
+*)
+
+val term_qchk = exists_subterm (
+      fn Const(\<^const_name>\<open>less\<close>, _) $ (Const(\<^const_name>\<open>less\<close>, _) $ A $ B) $ C => true
+       | Const(\<^const_name>\<open>less_eq\<close>, _) $ (Const(\<^const_name>\<open>less_eq\<close>, _) $ A $ B) $ C => true
+       | Const("HOL.eq", _) $ (Const("HOL.eq", _) $ A $ B) $ C => true
+       | Const("HOL.iff", _) $ A $ (Const("HOL.iff", _) $ B $ C) => true
+       | _ => false )
+
+
+fun term_check tm =
+  if term_qchk tm
+  then let
+      fun maptm (Const(\<^const_name>\<open>less\<close>, _) $ (Const(\<^const_name>\<open>less\<close>, T1) $ A $ B) $ C)
+            = \<^Const>\<open>conj\<close> $ (Const(\<^const_name>\<open>less\<close>, T1) $ A $ B)
+                          $ (Const(\<^const_name>\<open>less\<close>, T1) $ B $ C)
+        | maptm (Const(\<^const_name>\<open>less_eq\<close>, _) $ (Const(\<^const_name>\<open>less_eq\<close>, T1) $ A $ B) $ C)
+            = \<^Const>\<open>conj\<close> $ (Const(\<^const_name>\<open>less_eq\<close>, T1) $ A $ B)
+                          $ (Const(\<^const_name>\<open>less_eq\<close>, T1) $ B $ C)
+        | maptm (Const("HOL.eq", _) $ (Const("HOL.eq", T1) $ A $ B) $ C)
+            = \<^Const>\<open>conj\<close> $ (Const("HOL.eq", T1) $ A $ B)
+                          $ (Const("HOL.eq", T1) $ B $ C)
+        | maptm (Const("HOL.iff", _) $ (Const("HOL.iff", T1) $ A $ B) $ C)
+            = \<^Const>\<open>conj\<close> $ (Const("HOL.iff", T1) $ A $ B)
+                          $ (Const("HOL.iff", T1) $ B $ C)
+        | maptm (origin as (A $ B)) =
+            let val A' = maptm A
+                val B' = maptm B
+             in if pointer_eq (A', A) andalso pointer_eq (B', B)
+                then origin
+                else A' $ B'
+            end
+        | maptm (origin as Abs (N,T,X)) =
+            let val X' = maptm X
+             in if pointer_eq (X', X)
+                then origin
+                else Abs (N, T, X')
+            end
+        | maptm X = X
+   in maptm tm
+  end
+  else tm
+
+in
+
+fun INIT_SYNTAX ctxt = ctxt
+  |> Proof_Context.notation false Syntax.mode_default [
+      (Const (\<^const_name>\<open>less_eq\<close>, dummyT), Mixfix (Input.string "(_/ \<le> _)", [51, 51], 50, Position.no_range)),
+      (Const (\<^const_name>\<open>less\<close>,    dummyT), Mixfix (Input.string "(_/ < _)",     [51, 51], 50, Position.no_range))
+    ]
+  |> Proof_Context.notation true Syntax.mode_default [
+      (Const (\<^const_name>\<open>less_eq\<close>, dummyT), Mixfix (Input.string "(_/ \<le> _)", [50, 51], 50, Position.no_range)),
+      (Const (\<^const_name>\<open>less\<close>,    dummyT), Mixfix (Input.string "(_/ < _)",     [50, 51], 50, Position.no_range))
+    ]
+  |> Context.proof_map (Syntax_Phases.term_check ~200 "a < b < c" (K (map term_check)))
+
+end
 
 (* Crush *)
 
@@ -1365,6 +1464,7 @@ val CMDS = Symtab.make [
       ("INDUCT",  INDUCT_CMD),
       ("CRUSH",   CRUSH_CMD),
       ("INTRO",   INTRO_CMD),
+      ("ALL_INTRO",INTRO_ALL_CMD),
       ("HAMMER",  HAMMER_CMD),
       ("PRINT",   PRINT_CMD),
       ("RULE",    RULE_CMD),
@@ -1417,7 +1517,8 @@ val keywords = let open Keyword
            (("CASE_SPLIT",  \<^here>), command_spec (prf_goal, [])),
            (("INDUCT",\<^here>), command_spec (prf_goal, [])),
            (("CRUSH", \<^here>), command_spec (prf_goal, [])),
-           (("INTRO",\<^here>), command_spec (prf_goal, [])),
+           (("INTRO", \<^here>), command_spec (prf_goal, [])),
+           (("ALL_INTRO", \<^here>), command_spec (prf_goal, [])),
            (("HAMMER",\<^here>), command_spec (prf_goal, [])),
            (("PRINT", \<^here>), command_spec (prf_goal, [])),
            (("RULE",  \<^here>), command_spec (prf_goal, [])),
@@ -1455,6 +1556,8 @@ fun parse_cmds source =
 
 fun PROVE tr ctxt st =
       INIT ctxt st
+   |> OPR (apfst INIT_SYNTAX)
+   |> OPR INIT_PROCESS
    |> tr
    |> (fn ((ctxt', S  as [HHF (st',_)]),_,_) =>
           let val st'' = singleton (Proof_Context.export ctxt' ctxt) st'
