@@ -89,6 +89,13 @@ qed
 lemma [transfer_rule]:
   \<open>(pcr_word ===> (\<longleftrightarrow>)) even ((dvd) 2 :: 'a::len word \<Rightarrow> bool)\<close>
 
+by (min_script \<open>
+  HAVE even_word_unfold: "\<forall>k. even k \<longleftrightarrow> (\<exists>l. take_bit LENGTH('a) k = take_bit LENGTH('a) (2 * l))" END
+  UNFOLD even_word_unfold [THEN spec, abs_def] dvd_def [where ?'a = "'a word", abs_def]
+  APPLY transfer_prover
+  END
+\<close>)
+
 proof -
   have even_word_unfold: "even k \<longleftrightarrow> (\<exists>l. take_bit LENGTH('a) k = take_bit LENGTH('a) (2 * l))" (is "?P \<longleftrightarrow> ?Q")
     for k :: int
