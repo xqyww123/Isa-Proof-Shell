@@ -40,15 +40,15 @@ by (min_script \<open>
   UNFOLD strict_prefix_def prefix_def END
 \<close>)
 
-lemma strict_prefixE' [elim?]:
-  assumes "strict_prefix xs ys"
-  obtains z zs where "ys = xs @ z # zs"
-by (min_script \<open>
-  CONSIDER us where "ys = xs @ us" and "xs \<noteq> ys"
-    UNFOLD strict_prefix_def prefix_def
+  lemma strict_prefixE' [elim?]:
+    assumes "strict_prefix xs ys"
+    obtains z zs where "ys = xs @ z # zs"
+  by (min_script \<open>
+    CONSIDER us where "ys = xs @ us" and "xs \<noteq> ys"
+      UNFOLD strict_prefix_def prefix_def
+      END
     END
-  END
-\<close>)
+  \<close>)
 
 (* FIXME rm *)
 lemma strict_prefixI [intro?]: "prefix xs ys \<Longrightarrow> xs \<noteq> ys \<Longrightarrow> strict_prefix xs ys"
@@ -76,13 +76,13 @@ theorem Nil_prefix [simp]: "prefix [] xs"
 theorem prefix_Nil [simp]: "(prefix xs []) = (xs = [])"
   by (fact prefix_bot.bot_unique)
 
-lemma prefix_snoc [simp]: "prefix xs (ys @ [y]) \<longleftrightarrow> xs = ys @ [y] \<or> prefix xs ys"
-by (min_script \<open>
-  CRUSH
-  CONSIDER zs where zs: "ys @ [y] = xs @ zs" END
-  NEXT
-  END
-\<close>)
+  lemma prefix_snoc [simp]: "prefix xs (ys @ [y]) \<longleftrightarrow> xs = ys @ [y] \<or> prefix xs ys"
+  by (min_script \<open>
+    CRUSH
+    CONSIDER zs where zs: "ys @ [y] = xs @ zs" END
+    NEXT
+    END
+  \<close>)
 
 lemma Cons_prefix_Cons [simp]: "prefix (x # xs) (y # ys) = (x = y \<and> prefix xs ys)"
   by (auto simp add: prefix_def)
@@ -117,15 +117,15 @@ by (min_script \<open>
 
 lemma append_one_prefix:
   "prefix xs ys \<Longrightarrow> length xs < length ys \<Longrightarrow> prefix (xs @ [ys ! length xs]) ys"
-by (min_script \<open>
-  UNFOLD prefix_def
-  CRUSH
-  CONSIDER sk :: "'a list" where sk: "ys = xs @ sk" END
-  HAVE f1: "\<And>v. ([]::'a list) @ v = v" END
-  HAVE "[] \<noteq> sk" END
-  HAVE "\<exists>v. xs @ hd sk # v = ys" END
-  END
-\<close>)
+  by (min_script \<open>
+    UNFOLD prefix_def
+    CRUSH
+    CONSIDER sk :: "'a list" where sk: "ys = xs @ sk" END
+    HAVE f1: "\<And>v. ([]::'a list) @ v = v" END
+    HAVE "[] \<noteq> sk" END
+    HAVE "\<exists>v. xs @ hd sk # v = ys" END
+    END
+  \<close>)
 
 
 theorem prefix_length_le: "prefix xs ys \<Longrightarrow> length xs \<le> length ys"
@@ -220,52 +220,72 @@ by (min_script \<open>
   END
 \<close>)
 
-lemma prefix_remdups_adj:
-  assumes "prefix xs ys"
-  shows   "prefix (remdups_adj xs) (remdups_adj ys)"
-  using assms
-proof (induction "length xs" arbitrary: xs ys rule: less_induct)
-  case (less xs)
-  show ?case
-  proof (cases xs)
-    case [simp]: (Cons x xs')
-    then obtain y ys' where [simp]: "ys = y # ys'"
-      using \<open>prefix xs ys\<close> by (cases ys) auto
-    from less show ?thesis
-      by (auto simp: remdups_adj_Cons' less_Suc_eq_le length_dropWhile_le
-               intro!: less prefix_dropWhile)
-  qed auto
-qed
+  lemma prefix_remdups_adj:
+    assumes "prefix xs ys"
+    shows   "prefix (remdups_adj xs) (remdups_adj ys)"
+    using assms
+  proof (induction "length xs" arbitrary: xs ys rule: less_induct)
+    case (less xs)
+    show ?case
+    proof (cases xs)
+      case [simp]: (Cons x xs')
+      then obtain y ys' where [simp]: "ys = y # ys'"
+        using \<open>prefix xs ys\<close> by (cases ys) auto
+      from less show ?thesis
+        by (auto simp: remdups_adj_Cons' less_Suc_eq_le length_dropWhile_le
+                 intro!: less prefix_dropWhile)
+    qed auto
+  qed
 
-lemma not_prefix_cases:
+
+lemma not_prefix_cases':
   assumes pfx: "\<not> prefix ps ls"
   obtains
     (c1) "ps \<noteq> []" and "ls = []"
   | (c2) a as x xs where "ps = a#as" and "ls = x#xs" and "x = a" and "\<not> prefix as xs"
   | (c3) a as x xs where "ps = a#as" and "ls = x#xs" and "x \<noteq> a"
-proof (cases ps)
-  case Nil
-  then show ?thesis using pfx by simp
-next
-  case (Cons a as)
-  note c = \<open>ps = a#as\<close>
-  show ?thesis
-  proof (cases ls)
-    case Nil then show ?thesis by (metis append_Nil2 pfx c1 same_prefix_nil)
+by (min_script \<open>
+  CASE_SPLIT ps
+  NEXT VARS a as
+    CASE_SPLIT ls
+    NEXT VARS x xs
+      CASE_SPLIT "x = a"
+        HAVE "\<not> prefix as xs" END
+  END
+\<close>)
+
+
+  lemma not_prefix_cases:
+    assumes pfx: "\<not> prefix ps ls"
+    obtains
+      (c1) "ps \<noteq> []" and "ls = []"
+    | (c2) a as x xs where "ps = a#as" and "ls = x#xs" and "x = a" and "\<not> prefix as xs"
+    | (c3) a as x xs where "ps = a#as" and "ls = x#xs" and "x \<noteq> a"
+  proof (cases ps)
+    case Nil
+    then show ?thesis using pfx by simp
   next
-    case (Cons x xs)
+    case (Cons a as)
+    note c = \<open>ps = a#as\<close>
     show ?thesis
-    proof (cases "x = a")
-      case True
-      have "\<not> prefix as xs" using pfx c Cons True by simp
-      with c Cons True show ?thesis by (rule c2)
+    proof (cases ls)
+      case Nil then show ?thesis
+        by (metis append_Nil2 pfx c1 same_prefix_nil)
     next
-      case False
-      with c Cons show ?thesis by (rule c3)
+      case (Cons x xs)
+      show ?thesis
+      proof (cases "x = a")
+        case True
+        have "\<not> prefix as xs" using pfx c Cons True by simp
+        with c Cons True show ?thesis by (rule c2)
+      next
+        case False
+        with c Cons show ?thesis by (rule c3)
+      qed
     qed
   qed
-qed
  
+
 lemma
   assumes np: "\<not> prefix ps ls"
     and base: "\<And>x xs. P (x#xs) []"
@@ -274,30 +294,30 @@ lemma
   shows "P ps ls" 
 by (min_script \<open>
   INDUCT ls arbitrary: ps
-  NEXT
-    HAVE "\<not> prefix ps (a # ls)" END
+  NEXT VARS y ys
+    HAVE "\<not> prefix ps (y # ys)" END
     CONSIDER x xs where pv: "ps = x # xs" END
   END
 \<close>)
 
-lemma not_prefix_induct [consumes 1, case_names Nil Neq Eq]:
-  assumes np: "\<not> prefix ps ls"
-    and base: "\<And>x xs. P (x#xs) []"
-    and r1: "\<And>x xs y ys. x \<noteq> y \<Longrightarrow> P (x#xs) (y#ys)"
-    and r2: "\<And>x xs y ys. \<lbrakk> x = y; \<not> prefix xs ys; P xs ys \<rbrakk> \<Longrightarrow> P (x#xs) (y#ys)"
-  shows "P ps ls" 
-using np
-proof (induct ls arbitrary: ps)
-  case Nil
-  then show ?case
-    by (auto simp: neq_Nil_conv elim!: not_prefix_cases intro!: base)
-next
-  case (Cons y ys)
-  then have npfx: "\<not> prefix ps (y # ys)" by simp
-  then obtain x xs where pv: "ps = x # xs"
-    by (rule not_prefix_cases) auto
-  show ?case by (metis Cons.hyps Cons_prefix_Cons npfx pv r1 r2)
-qed
+  lemma not_prefix_induct [consumes 1, case_names Nil Neq Eq]:
+    assumes np: "\<not> prefix ps ls"
+      and base: "\<And>x xs. P (x#xs) []"
+      and r1: "\<And>x xs y ys. x \<noteq> y \<Longrightarrow> P (x#xs) (y#ys)"
+      and r2: "\<And>x xs y ys. \<lbrakk> x = y; \<not> prefix xs ys; P xs ys \<rbrakk> \<Longrightarrow> P (x#xs) (y#ys)"
+    shows "P ps ls" 
+  using np
+  proof (induct ls arbitrary: ps)
+    case Nil
+    then show ?case
+      by (auto simp: neq_Nil_conv elim!: not_prefix_cases intro!: base)
+  next
+    case (Cons y ys)
+    then have npfx: "\<not> prefix ps (y # ys)" by simp
+    then obtain x xs where pv: "ps = x # xs"
+      by (rule not_prefix_cases) auto
+    show ?case by (metis Cons.hyps Cons_prefix_Cons npfx pv r1 r2)
+  qed
 
 
 subsection \<open>Prefixes\<close>
@@ -386,7 +406,7 @@ by (min_script \<open>
     LET ?EX = "\<lambda>n. \<exists>xs\<in>L. n = length xs"
     CONSIDER x xs where "x#xs \<in> L" "size xs = n" END
     HAVE "[] \<notin> L" END WITH Suc.hyps(2)
-      CASE_SPLIT "\<forall>xs \<in> L. \<exists>ys. xs = x#ys"
+    CASE_SPLIT "\<forall>xs \<in> L. \<exists>ys. xs = x#ys"
       LET ?L = "{ys. x#ys \<in> L}"
       HAVE 1: "(LEAST n. \<exists>xs \<in> ?L. n = length xs) = n" END
       HAVE 2: "?L \<noteq> {}" END

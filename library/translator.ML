@@ -1,7 +1,5 @@
 signature ML_TRANSLATOR = sig
 
-
-
 end
 
 structure ML_Translator : ML_TRANSLATOR = struct
