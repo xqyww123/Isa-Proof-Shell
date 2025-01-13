@@ -289,7 +289,7 @@ proof (induction "length (xs @ ys) + length xs" arbitrary: xs ys rule: less_indu
   qed
 qed
 
-  
+   
            
 lemma polyfun_extremal_lemma': 
     fixes c :: "nat \<Rightarrow> 'a::real_normed_div_algebra"
