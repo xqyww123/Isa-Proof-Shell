@@ -78,6 +78,7 @@ fun TODO _ _ = raise Unsupported
 fun unsupported _ _ = raise Unsupported
 
 val initial_parsers = Symtab.make [
+
   ("apply",      tactic_parser),
   ("apply_end",  tactic_parser),
   ("by",         tactic_parser),

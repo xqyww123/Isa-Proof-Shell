@@ -65,6 +65,9 @@ val HAMMER_CMD : command
 val END : Sledgehammer.fact_override -> operation
 val END_CMD : command
 
+val NOTATION : Syntax.mode -> (term * mixfix) list -> operation
+val NOTATION_CMD : command
+
 val NXT : opt_var_names -> Sledgehammer.fact_override -> operation
 val NXT_CMD : command
 
@@ -342,6 +345,7 @@ fun unwrap ctxt th = th
 
 (* Maintain *)
 
+val empty_pctxt : pctxt = ([],[])
 (*primary is the newer. The newer is appended to the list*)
 fun cat_pctxt (vs',hs') (vs,hs)
       = (join_lstR (vs', vs), join_lstL (hs', hs))
@@ -479,6 +483,8 @@ fun restore_history name (_,his,ID) =
 fun SKIP_SUCCESS F (SK as (_, HHF (st,_) :: _)) =
         if Thm.no_prems st then SK else F SK
   | SKIP_SUCCESS F SK = F SK
+fun OPR_NO_INCR (f : stack -> stack) ((S,TAB,ID) : state) : state
+  = (f S, TAB, ID)
 fun OPR (f : stack -> stack) ((S,TAB,ID) : state) : state
   = (f S, TAB, ID+1)
 fun OPR_ID (f : int -> stack -> stack) ((S,TAB,ID) : state) : state
@@ -489,14 +495,11 @@ fun CONTEXTUAL_CMD (parser : Proof.context -> command)
   = ((fn (s:state) => fst (parser (#1 (#1 s)) toks) s), [])
 
 
-val INTRO = OPR o INTRO'
 val VARS_KWD = (Parse.$$$ "VARS" || Parse.$$$ "vars")
 val VARS = VARS_KWD |-- Scan.repeat Parse.binding
 val VARS_FOR_SINGLE_GOAL = Scan.option VARS >> SINGLE_GOAL
 val IN = (Parse.$$$ "IN" || Parse.$$$ "in")
 
-val INTRO_CMD = VARS_FOR_SINGLE_GOAL >> INTRO
-val INTRO_ALL_CMD = Scan.succeed (INTRO ALL_SUBGOALS)
 
 val SOLVED_GOAL = \<^prop>\<open>True\<close>
 
@@ -609,7 +612,9 @@ fun TRY_STANDARD (SK as (ctxt, HHF (st, _) :: _)) =
   end handle Bind => SK )
   | TRY_STANDARD _ = raise BROKEN_INVARIANT
 
-val INIT_PROCESS = TRY_STANDARD
+fun INTRO mode = OPR (INTRO' mode o TRY_STANDARD)
+val INTRO_CMD = VARS_FOR_SINGLE_GOAL >> INTRO
+val INTRO_ALL_CMD = Scan.succeed (OPR (INTRO' ALL_SUBGOALS))
 
 local
 (*
@@ -692,7 +697,8 @@ end
 val crush_timeout = Attrib.setup_config_int \<^binding>\<open>crush_timeout\<close> (K 10) (*in seconds*)
 
 fun CRUSH' _ _ (ctxt, []) = (ctxt, [])
-  | CRUSH' prep_with (imode, raw_with_lems) (s as (ctxt, _)) =
+  | CRUSH' prep_with (imode, raw_with_lems) SK0 =
+  TRY_STANDARD SK0 |> (fn (s as (ctxt, _)) =>
   let val with_lems = prep_with ctxt raw_with_lems
       val ctxt = apply_WITH with_lems ctxt
       val time = Config.get ctxt crush_timeout
@@ -708,7 +714,7 @@ fun CRUSH' _ _ (ctxt, []) = (ctxt, [])
            | Timeout.TIMEOUT _ =>
                 raise OPR_FAIL "Timeout")
    |> SKIP_SUCCESS (INTRO' imode)
-  end
+  end)
 
 val CRUSH = OPR o (CRUSH' (K I))
 
@@ -961,11 +967,11 @@ end
 fun RULE'_i rules facts =
   apply' (fn s => CONTEXT_TACTIC (HEADGOAL (Classical.rule_tac (#1 s) rules facts)) s) NONE
 
-fun RULE' [] raw_facts (SK as (ctxt, _)) =
+fun RULE'' [] raw_facts (SK as (ctxt, _)) =
   let val facts = Attrib.eval_thms ctxt raw_facts
    in RULE'_i [] facts SK
   end
-  | RULE' raw_rules raw_facts (ctxt, HHF (st, pctxt) :: SK) =
+  | RULE'' raw_rules raw_facts (ctxt, HHF (st, pctxt) :: SK) =
   let val facts = Attrib.eval_thms ctxt raw_facts
       val rules = maps (fn raw_rule =>
             let val name = name_of_ref (fst raw_rule)
@@ -986,7 +992,11 @@ fun RULE' [] raw_facts (SK as (ctxt, _)) =
         | NONE => raise OPR_FAIL "Fail to apply the rules" )
    |> maintain
   end
-  | RULE' _ _ _ = raise BROKEN_INVARIANT
+  | RULE'' _ _ _ = raise BROKEN_INVARIANT
+
+fun RULE' rules facts SK = SK
+      |> TRY_STANDARD
+      |> RULE'' rules facts
 
 val RULE = OPR oo RULE'
 val RULE_CMD = let open Parse
@@ -997,8 +1007,8 @@ val RULE_CMD = let open Parse
 
 (* HAVE *)
 
-fun HAVE' _ _ (ctxt, []) = (ctxt, [])
-  | HAVE' raw_name expr (ctxt, HHF (G,pctxt) :: S) =
+fun HAVE'' _ _ _ (ctxt, []) = (ctxt, [])
+  | HAVE'' AP raw_name expr (ctxt, HHF (G,pctxt) :: S) =
       let val SOME (_, jj, _) = IPS_Data.get ctxt
           val name = Option.map (fn (name, raw_attrs) =>
                         (Binding.name name,
@@ -1012,17 +1022,20 @@ fun HAVE' _ _ (ctxt, []) = (ctxt, [])
           val goal_term = Syntax.read_prop ctxt expr
           val goal = Goal.init (Thm.cterm_of ctxt goal_term)
           fun CB ctxt' (st',(*pctxt'*) _,S, _) =
-            let val lems = Goal.conclude st'
-                        |> singleton (Proof_Context.export ctxt' ctxt)
-                        |> elim_conjs ctxt
-                val ((name,lems), ctxt'') =
-                        Proof_Context.note_thms "" (name, [(lems,[])]) ctxt
-             in (ctxt'', HHF (G, cat_pctxt ([], [(name, map Thm.prop_of lems)]) pctxt) :: S)
+            let val lem = Goal.conclude st'
+                       |> singleton (Proof_Context.export ctxt' ctxt)
+             in AP (ctxt,name,pctxt,G,S,lem)
             end
           fun PRT _ t = BUNDL (pctxt, [t, print_stack [HHF (G,([],[]))]])
        in (ctxt, HHF (goal, ([],[])) :: ENDBLK T_END :: MAGIC (CB, PRT, NO_PARAM) :: S)
       end
-  | HAVE' _ _ _ = raise BROKEN_INVARIANT
+  | HAVE'' _ _ _ _ = raise BROKEN_INVARIANT
+
+val HAVE' = HAVE'' (fn (ctxt,name,pctxt,st,S,lem) =>
+  let val lems = elim_conjs ctxt lem
+      val ((name,lems), ctxt'') = Proof_Context.note_thms "" (name, [(lems,[])]) ctxt
+   in (ctxt'', HHF (st, cat_pctxt ([], [(name, map Thm.prop_of lems)]) pctxt) :: S)
+  end)
 
 val HAVE = OPR oo HAVE'
 
@@ -1289,13 +1302,15 @@ fun CONSIDER' raw_terms (ctxt, HHF (st,facts,IA) :: SK) =
 *)
 (* HAMMER *)
 
-fun HAMMER_i override step_id (ctxt, HHF (s,facts) :: S) =
+fun HAMMER_i override step_id SK =
+  TRY_STANDARD SK |> (fn (ctxt, HHF (s,facts) :: S) =>
   let val SOME (_, _, ID_BASE) = IPS_Data.get ctxt
       val ID = ID_BASE ^ "/" ^ step_id
       val s' = Phi_Sledgehammer_Solver.auto override (SOME ID) ctxt s
    in maintain (ctxt, HHF (s', facts) :: S)
   end
-  | HAMMER_i _ _ _ = raise BROKEN_INVARIANT
+    | _ => raise BROKEN_INVARIANT)
+  
 
 fun HAMMER_all override step_id =
   let val ID_BASE = step_id ^ "/"
@@ -1447,6 +1462,68 @@ fun PRINT (state as ((ctxt,SK), _, ID)) =
   end
 val PRINT_CMD = Scan.succeed PRINT
 
+(* WRITE *)
+
+local
+
+fun read_arg (c, mx) ctxt =
+  (case Proof_Context.read_const {proper = false, strict = false} ctxt c of
+    Free (x, _) =>
+      let
+        val ctxt' =
+          ctxt |> is_none (Variable.default_type ctxt x) ?
+            Variable.declare_constraints (Free (x, Mixfix.default_constraint mx));
+        val t = Free (#1 (Proof_Context.inferred_param x ctxt'));
+      in ((t, mx), ctxt') end
+  | t => ((t, mx), ctxt));
+
+in
+
+fun WRITE' prep_arg mode args (ctxt, SK) =
+  (Proof_Context.notation true mode (fst (fold_map prep_arg args ctxt)) ctxt, SK)
+
+val NOTATION = OPR oo WRITE' pair
+val NOTATION_CMD = Parse.syntax_mode -- Parse.and_list1 (Parse.const -- Parse.mixfix)
+             >> (fn (mode, args) => OPR (WRITE' read_arg mode args))
+
+end
+
+(* USE_THEORY *)
+
+fun USE_THEORY' interp expr (lthy, HHF (st, pctxt) :: SK) =
+  let val _ = Local_Theory.assert lthy
+      val ps = interp expr lthy
+      val ctxtp = Proof.context_of ps
+      
+      fun PRT _ t = BUNDL (pctxt, [t, print_stack [HHF (st, empty_pctxt)]])
+      fun CB ctxt' (raw_st', _, SK', _) =
+        let val st' = singleton (Proof_Context.export ctxt' ctxtp) raw_st'
+            val ctxt'' = Proof.refine_primitive (K (K st')) ps
+                      |> Proof.global_done_proof
+
+            val facts = Proof_Context.facts_of ctxt'';
+            val local_facts =
+              Facts.dest_static false [Proof_Context.facts_of lthy] facts
+                |> map (apsnd (map Thm.prop_of))
+            val local_facts = if length local_facts > 16 then [] else local_facts
+                  (*Trim off facts if too many*)
+
+         in (ctxt'',
+             HHF (st, cat_pctxt ([],local_facts) pctxt) :: SK')
+        end
+
+   in (ctxtp,
+       HHF (#goal (Proof.raw_goal ps), empty_pctxt)
+       :: ENDBLK T_END
+       :: MAGIC (CB, PRT, NO_PARAM)
+       :: SK)
+  end
+  | USE_THEORY' _ _ _ = raise BROKEN_INVARIANT
+
+val USE_THEORY = OPR o USE_THEORY' Interpretation.interpretation
+val USE_THEORY_CMD = Parse.!!! Parse_Spec.locale_expression
+                  >> (OPR o USE_THEORY' Interpretation.interpretation_cmd)
+
 (** Toplevel **)
 
 (* Interfaces *)
@@ -1473,7 +1550,9 @@ val CMDS = Symtab.make [
       ("APPLY",   APPLY_CMD),
       ("apply",   APPLY_CMD),
       ("UNFOLD",  UNFOLD_CMD),
-      ("CHOOSE",  CHOOSE_CMD)
+      ("CHOOSE",  CHOOSE_CMD),
+      ("NOTATION",NOTATION_CMD),
+      ("USE_THY", USE_THEORY_CMD)
     ]
 
 val keywords = let open Keyword
@@ -1508,6 +1587,9 @@ val keywords = let open Keyword
            (("WITHOUT",\<^here>),quasi_command_spec),
            (("IN",    \<^here>), quasi_command_spec),
            (("VARS",  \<^here>), quasi_command_spec),
+           (("infix",  \<^here>), quasi_command_spec),
+           (("infixr", \<^here>), quasi_command_spec),
+           (("infixl", \<^here>), quasi_command_spec),
 
            (("END",   \<^here>), command_spec (thy_end, [])),
            (("end",   \<^here>), command_spec (thy_end, [])),
@@ -1525,7 +1607,9 @@ val keywords = let open Keyword
            (("LET",   \<^here>), command_spec (prf_goal, [])),
            (("APPLY", \<^here>), command_spec (prf_goal, [])),
            (("UNFOLD",\<^here>), command_spec (prf_goal, [])),
-           (("CHOOSE",\<^here>), command_spec (prf_goal, []))
+           (("CHOOSE",\<^here>), command_spec (prf_goal, [])),
+           (("NOTATION",\<^here>), command_spec (prf_goal, [])),
+           (("USE_THY",\<^here>), command_spec (prf_goal, []))
          ]
      end
 
@@ -1556,8 +1640,7 @@ fun parse_cmds source =
 
 fun PROVE tr ctxt st =
       INIT ctxt st
-   |> OPR (apfst INIT_SYNTAX)
-   |> OPR INIT_PROCESS
+   |> OPR_NO_INCR (apfst INIT_SYNTAX)
    |> tr
    |> (fn ((ctxt', S  as [HHF (st',_)]),_,_) =>
           let val st'' = singleton (Proof_Context.export ctxt' ctxt) st'

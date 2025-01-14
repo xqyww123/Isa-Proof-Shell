@@ -4,4 +4,6 @@ begin
 
 ML_file \<open>./library/translator.ML\<close>
 
+write
+
 end
