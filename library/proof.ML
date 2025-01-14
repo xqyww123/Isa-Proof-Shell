@@ -80,6 +80,12 @@ val PRINT_CMD : command
 val RULE : (Facts.ref * Token.src list) list -> (Facts.ref * Token.src list) list -> operation
 val RULE_CMD : command
 
+val DEFINE : (binding * typ option * mixfix) list
+          -> (Thm.binding * (term * term list) list) list
+          -> (binding * typ option * mixfix) list
+          -> operation
+val DEFINE_CMD : command
+
 (* Toplevel *)
 
 val parse_cmds : string -> operation
@@ -199,9 +205,12 @@ fun init_ctxt c st = IPS_Data.put (
         ) c
 
 fun INIT c st =
-  let val facts = Proof_Context.facts_of c;
+  let val facts = Proof_Context.facts_of c
+      val facts' = if can Local_Theory.assert c
+                   then Proof_Context.facts_of (Local_Theory.target_of c)
+                   else Global_Theory.facts_of (Proof_Context.theory_of c)
       val local_facts =
-        Facts.dest_static false [Global_Theory.facts_of (Proof_Context.theory_of c)] facts
+        Facts.dest_static false [facts'] facts
           |> map (apsnd (map Thm.prop_of))
 
       val (vars, _) = Variable.constraints_of c
@@ -1509,6 +1518,18 @@ val USE_THEORY = OPR o USE_THEORY' Interpretation.interpretation
 val USE_THEORY_CMD = Parse.!!! Parse_Spec.locale_expression
                   >> (OPR o USE_THEORY' Interpretation.interpretation_cmd)
 
+(* LOCAL DEFINE *)
+
+fun DEFINE' define (ctxt, SK) =
+  (Proof.init ctxt
+    |> define
+    |> Proof.context_of,
+   SK)
+
+fun DEFINE names exprs fixes = OPR (DEFINE' (Proof.define names fixes exprs))
+val DEFINE_CMD = (Parse.vars --| Parse.where_) -- Parse_Spec.statement -- Parse.for_fixes
+              >> (fn ((a,b),c) => OPR (DEFINE' (Proof.define_cmd a c b)))
+
 (** Toplevel **)
 
 (* Interfaces *)
@@ -1537,7 +1558,8 @@ val CMDS = Symtab.make [
       ("UNFOLD",  UNFOLD_CMD),
       ("CHOOSE",  CHOOSE_CMD),
       ("NOTATION",NOTATION_CMD),
-      ("USE_THY", USE_THEORY_CMD)
+      ("USE_THY", USE_THEORY_CMD),
+      ("DEFINE",  DEFINE_CMD)
     ]
 
 val keywords = let open Keyword
@@ -1587,14 +1609,15 @@ val keywords = let open Keyword
            (("INTRO", \<^here>), command_spec (prf_goal, [])),
            (("ALL_INTRO", \<^here>), command_spec (prf_goal, [])),
            (("HAMMER",\<^here>), command_spec (prf_goal, [])),
-           (("PRINT", \<^here>), command_spec (prf_goal, [])),
-           (("RULE",  \<^here>), command_spec (prf_goal, [])),
-           (("LET",   \<^here>), command_spec (prf_goal, [])),
-           (("APPLY", \<^here>), command_spec (prf_goal, [])),
+           (("PRINT", \<^here>), command_spec (diag,     [])),
+           (("RULE",  \<^here>), command_spec (prf_decl, [])),
+           (("LET",   \<^here>), command_spec (prf_decl, [])),
+           (("APPLY", \<^here>), command_spec (prf_decl, [])),
            (("UNFOLD",\<^here>), command_spec (prf_goal, [])),
-           (("CHOOSE",\<^here>), command_spec (prf_goal, [])),
-           (("NOTATION",\<^here>), command_spec (prf_goal, [])),
-           (("USE_THY",\<^here>), command_spec (prf_goal, []))
+           (("CHOOSE",\<^here>), command_spec (prf_decl, [])),
+           (("NOTATION",\<^here>), command_spec (prf_decl, [])),
+           (("USE_THY",\<^here>), command_spec (prf_goal, [])),
+           (("DEFINE",\<^here>), command_spec (prf_decl, []))
          ]
      end
 

@@ -54,7 +54,7 @@ text \<open>
   assumes "equivalent_bicategories V\<^sub>C H\<^sub>C \<a>\<^sub>C \<i>\<^sub>C src\<^sub>C trg\<^sub>C V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D"
   and "bicategory_of_spans V\<^sub>C H\<^sub>C \<a>\<^sub>C \<i>\<^sub>C src\<^sub>C trg\<^sub>C"
   shows "bicategory_of_spans V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D"
-  
+    
 apply (min_script \<open>
   USE_THY C: bicategory_of_spans V\<^sub>C H\<^sub>C \<a>\<^sub>C \<i>\<^sub>C src\<^sub>C trg\<^sub>C END
   USE_THY D: bicategory V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D
@@ -90,8 +90,69 @@ apply (min_script \<open>
 
   CRUSH VARS r'
     CONSIDER f g where fg: "C.is_left_adjoint f \<and> C.is_left_adjoint g \<and> F.right_map r' \<cong>\<^sub>C g \<star>\<^sub>C f\<^sup>*\<^sup>C" END
-    HAVE "trg\<^sub>C g = E.G.map\<^sub>0 (trg\<^sub>D r')" END WITH fg C.isomorphic_implies_ide C.isomorphic_implies_hpar
-    HAVE "trg\<^sub>C f = E.G.map\<^sub>0 (src\<^sub>D r')" END WITH fg C.isomorphic_implies_ide C.isomorphic_implies_hpar
+    HAVE trg_g: "trg\<^sub>C g = E.G.map\<^sub>0 (trg\<^sub>D r')" END WITH fg C.isomorphic_implies_ide C.isomorphic_implies_hpar
+    HAVE trg_f: "trg\<^sub>C f = E.G.map\<^sub>0 (src\<^sub>D r')" END WITH fg C.isomorphic_implies_ide C.isomorphic_implies_hpar
+    DEFINE d_src where "d_src \<equiv> F.counit\<^sub>0 (src\<^sub>D r')"
+    DEFINE e_src where "e_src \<equiv> (F.counit\<^sub>0 (src\<^sub>D r'))\<^sup>~\<^sup>D"
+    HAVE "\<guillemotleft>d_src : F.map\<^sub>0 (E.G.map\<^sub>0 (src\<^sub>D r')) \<rightarrow>\<^sub>D src\<^sub>D r'\<guillemotright> \<and>
+                     D.equivalence_map d_src"
+        END
+    HAVE e_src: "\<guillemotleft>e_src : src\<^sub>D r' \<rightarrow>\<^sub>D F.map\<^sub>0 (E.G.map\<^sub>0 (src\<^sub>D r'))\<guillemotright> \<and>
+                     D.equivalence_map e_src" END
+    CONSIDER \<eta>_src \<epsilon>_src
+        where eq_src: "equivalence_in_bicategory V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D d_src e_src \<eta>_src \<epsilon>_src" END
+    USE_THY eq_src: equivalence_in_bicategory
+                            V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D d_src e_src \<eta>_src \<epsilon>_src END
+    DEFINE d_trg where "d_trg \<equiv> F.counit\<^sub>0 (trg\<^sub>D r')"
+    DEFINE e_trg where "e_trg \<equiv> (F.counit\<^sub>0 (trg\<^sub>D r'))\<^sup>~\<^sup>D"
+    HAVE d_trg: "\<guillemotleft>d_trg : F.map\<^sub>0 (E.G.map\<^sub>0 (trg\<^sub>D r')) \<rightarrow>\<^sub>D trg\<^sub>D r'\<guillemotright> \<and>
+                     D.equivalence_map d_trg" END
+    HAVE e_trg: "\<guillemotleft>e_trg : trg\<^sub>D r' \<rightarrow>\<^sub>D F.map\<^sub>0 (E.G.map\<^sub>0 (trg\<^sub>D r'))\<guillemotright> \<and>
+                     D.equivalence_map e_trg" END
+    CONSIDER \<eta>_trg \<epsilon>_trg
+        where eq_trg: "equivalence_in_bicategory V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D d_trg e_trg \<eta>_trg \<epsilon>_trg" END
+    USE_THY eq_trg: equivalence_in_bicategory V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D d_trg e_trg \<eta>_trg \<epsilon>_trg END
+    USE_THY eqs: two_equivalences_in_bicategory V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D
+                            d_src e_src \<eta>_src \<epsilon>_src d_trg e_trg \<eta>_trg \<epsilon>_trg END
+    USE_THY hom: subcategory V\<^sub>D \<open>\<lambda>\<mu>. \<guillemotleft>\<mu> : trg\<^sub>D d_src \<rightarrow>\<^sub>D trg\<^sub>D d_trg\<guillemotright>\<close> END
+    USE_THY hom': subcategory V\<^sub>D \<open>\<lambda>\<mu>. \<guillemotleft>\<mu> : src\<^sub>D d_src \<rightarrow>\<^sub>D src\<^sub>D d_trg\<guillemotright>\<close> END
+    USE_THY e: equivalence_of_categories hom.comp hom'.comp eqs.F eqs.G eqs.\<phi> eqs.\<psi> END
+    HAVE r'_in_hhom: "D.in_hhom r' (src\<^sub>D e_src) (src\<^sub>D e_trg)" END
+    DEFINE g' where "g' = d_trg \<star>\<^sub>D F g"
+    HAVE g': "D.is_left_adjoint g'" UNFOLD g'_def END WITH fg d_trg trg_g C.left_adjoint_is_ide D.equivalence_is_adjoint
+                D.left_adjoints_compose F.preserves_left_adjoint C.ideD(1) D.in_hhom_def
+                F.preserves_trg
+    HAVE 1: "D.is_right_adjoint (F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src)"
+          HAVE "D.is_right_adjoint e_src" END
+          HAVE "D.is_right_adjoint (F f\<^sup>*\<^sup>C)" END
+          HAVE "src\<^sub>D (F f\<^sup>*\<^sup>C) = trg\<^sub>D e_src" END
+        END
+    CONSIDER f' where f': "D.adjoint_pair f' (F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src)" END
+    HAVE f': "D.is_left_adjoint f' \<and> F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src \<cong>\<^sub>D (f')\<^sup>*\<^sup>D" END
+    HAVE "r' \<cong>\<^sub>D d_trg \<star>\<^sub>D (e_trg \<star>\<^sub>D r' \<star>\<^sub>D d_src) \<star>\<^sub>D e_src" END WITH r'_in_hhom D.isomorphic_def eqs.\<psi>_in_hom eqs.\<psi>_components_are_iso
+                D.isomorphic_symmetric D.ide_char eq_src.antipar(2) eq_trg.antipar(2)
+    HAVE 1: "d_trg \<star>\<^sub>D (e_trg \<star>\<^sub>D r' \<star>\<^sub>D d_src) \<star>\<^sub>D e_src \<cong>\<^sub>D d_trg \<star>\<^sub>D F (F.right_map r') \<star>\<^sub>D e_src"
+      HAVE "e_trg \<star>\<^sub>D r' \<star>\<^sub>D d_src \<cong>\<^sub>D F (F.right_map r')"
+        HAVE "D.in_hom (F.counit\<^sub>1 r')
+                        (r' \<star>\<^sub>D d_src) (F.counit\<^sub>0 (trg\<^sub>D r') \<star>\<^sub>D F (F.right_map r'))"
+          UNFOLD d_src_def END WITH E.\<epsilon>.map\<^sub>1_in_hom(2) [of r']
+        HAVE "r' \<star>\<^sub>D d_src \<cong>\<^sub>D F.counit\<^sub>0 (trg\<^sub>D r') \<star>\<^sub>D F (F.right_map r')"
+          END WITH D.isomorphic_def E.\<epsilon>.iso_map\<^sub>1_ide
+      END
+    END
+    HAVE 2: "d_trg \<star>\<^sub>D F (F.right_map r') \<star>\<^sub>D e_src \<cong>\<^sub>D d_trg \<star>\<^sub>D (F g \<star>\<^sub>D F f\<^sup>*\<^sup>C) \<star>\<^sub>D e_src"
+      HAVE "F (F.right_map r') \<cong>\<^sub>D F g \<star>\<^sub>D F f\<^sup>*\<^sup>C"
+        END WITH C.hseq_char C.ideD(1) C.isomorphic_implies_ide(2) C.left_adjoint_is_ide
+                C.right_adjoint_simps(1) D.isomorphic_symmetric D.isomorphic_transitive
+                F.preserves_isomorphic F.weakly_preserves_hcomp fg
+    END
+    HAVE 3: "d_trg \<star>\<^sub>D (F g \<star>\<^sub>D F f\<^sup>*\<^sup>C) \<star>\<^sub>D e_src \<cong>\<^sub>D (d_trg \<star>\<^sub>D F g) \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src"
+      HAVE "d_trg \<star>\<^sub>D (F g \<star>\<^sub>D F f\<^sup>*\<^sup>C) \<star>\<^sub>D e_src \<cong>\<^sub>D d_trg \<star>\<^sub>D F g \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src" END 
+      HAVE "d_trg \<star>\<^sub>D F g \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src \<cong>\<^sub>D (d_trg \<star>\<^sub>D F g) \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src" END
+    END
+    HAVE "(d_trg \<star>\<^sub>D F g) \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src \<cong>\<^sub>D g' \<star>\<^sub>D f'\<^sup>*\<^sup>D" END
+    HAVE "D.isomorphic r' (g' \<star>\<^sub>D f'\<^sup>*\<^sup>D)" END
+  END
 \<close>)
 
 
@@ -202,8 +263,7 @@ apply (min_script \<open>
         have r'_in_hhom: "D.in_hhom r' (src\<^sub>D e_src) (src\<^sub>D e_trg)"
           using r' e_src e_trg by (simp add: D.in_hhom_def)
 
-        define g'
-        where "g' = d_trg \<star>\<^sub>D F g"
+        define g' where "g' = d_trg \<star>\<^sub>D F g"
         have g': "D.is_left_adjoint g'"
           unfolding g'_def
           using fg r' d_trg trg_g C.left_adjoint_is_ide D.equivalence_is_adjoint
@@ -239,6 +299,7 @@ apply (min_script \<open>
                     (r' \<star>\<^sub>D d_src) (F.counit\<^sub>0 (trg\<^sub>D r') \<star>\<^sub>D F (F.right_map r'))"
               unfolding d_src_def
               using r' E.\<epsilon>.map\<^sub>1_in_hom(2) [of r'] by simp
+
             hence "r' \<star>\<^sub>D d_src \<cong>\<^sub>D F.counit\<^sub>0 (trg\<^sub>D r') \<star>\<^sub>D F (F.right_map r')"
               using r' D.isomorphic_def E.\<epsilon>.iso_map\<^sub>1_ide by auto
             thus ?thesis
@@ -253,7 +314,7 @@ apply (min_script \<open>
                   eq_trg.antipar(2) r'
             by force
         qed
-        also have 2: "... \<cong>\<^sub>D d_trg \<star>\<^sub>D (F g \<star>\<^sub>D F f\<^sup>*\<^sup>C) \<star>\<^sub>D e_src"
+        also have 2: "d_trg \<star>\<^sub>D F (F.right_map r') \<star>\<^sub>D e_src \<cong>\<^sub>D d_trg \<star>\<^sub>D (F g \<star>\<^sub>D F f\<^sup>*\<^sup>C) \<star>\<^sub>D e_src"
         proof -
           have "F (F.right_map r') \<cong>\<^sub>D F g \<star>\<^sub>D F f\<^sup>*\<^sup>C"
             by (meson C.hseq_char C.ideD(1) C.isomorphic_implies_ide(2) C.left_adjoint_is_ide
@@ -264,20 +325,20 @@ apply (min_script \<open>
             by (metis 1 D.hseqE D.ideD(1) D.isomorphic_implies_hpar(2)
                 eq_src.ide_right eq_trg.ide_left)
         qed
-        also have 3: "... \<cong>\<^sub>D (d_trg \<star>\<^sub>D F g) \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src"
+        also HAVE 3: "d_trg \<star>\<^sub>D (F g \<star>\<^sub>D F f\<^sup>*\<^sup>C) \<star>\<^sub>D e_src \<cong>\<^sub>D (d_trg \<star>\<^sub>D F g) \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src"
         proof -
-          have "... \<cong>\<^sub>D d_trg \<star>\<^sub>D F g \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src"
+          have "d_trg \<star>\<^sub>D (F g \<star>\<^sub>D F f\<^sup>*\<^sup>C) \<star>\<^sub>D e_src \<cong>\<^sub>D d_trg \<star>\<^sub>D F g \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src"
             by (metis C.left_adjoint_is_ide C.right_adjoint_simps(1) D.hcomp_assoc_isomorphic
                 D.hcomp_ide_isomorphic D.hcomp_simps(1) D.hseq_char D.ideD(1)
                 D.isomorphic_implies_hpar(2) F.preserves_ide calculation eq_src.ide_right
                 eq_trg.ide_left fg)
-          also have "... \<cong>\<^sub>D (d_trg \<star>\<^sub>D F g) \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src"
+          also have "d_trg \<star>\<^sub>D F g \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src \<cong>\<^sub>D (d_trg \<star>\<^sub>D F g) \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src"
             by (metis C.left_adjoint_is_ide D.hcomp_assoc_isomorphic D.hcomp_simps(2)
                 D.hseq_char D.ideD(1) D.isomorphic_implies_ide(1) D.isomorphic_symmetric
                 F.preserves_ide calculation eq_trg.ide_left f' fg)
           finally show ?thesis by blast
         qed
-        also have "... \<cong>\<^sub>D g' \<star>\<^sub>D f'\<^sup>*\<^sup>D"
+        also have "(d_trg \<star>\<^sub>D F g) \<star>\<^sub>D F f\<^sup>*\<^sup>C \<star>\<^sub>D e_src \<cong>\<^sub>D g' \<star>\<^sub>D f'\<^sup>*\<^sup>D"
           using g'_def f'
           by (metis 3 D.adjoint_pair_antipar(1) D.hcomp_ide_isomorphic D.hseq_char D.ideD(1)
               D.isomorphic_implies_ide(2) g')

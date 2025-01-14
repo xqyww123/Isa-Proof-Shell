@@ -12,6 +12,22 @@ ML_file \<open>./library/proof.ML\<close>
 
 interpret
 print_facts
-write
+  write
+  define
+
+lemma
+  \<open>False\<close>
+  ML_val \<open>
+let val ((a,b),c) = Parse.read_embedded \<^context>
+                (Thy_Header.get_keywords \<^theory>)
+                ((Parse.vars --| Parse.where_) -- Parse_Spec.statement -- Parse.for_fixes)
+                (Input.string "a where \<open>a = (1::nat)\<close>")
+    val s = Proof.init \<^context>
+    val s' = Proof.define_cmd a c b s
+    val ctxt' = Proof.context_of s'
+ in Proof_Context.get_thms ctxt' "a_def"
+end
+\<close>
+
 
 end
