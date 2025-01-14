@@ -69,7 +69,7 @@ lemma
 \<close>)
  
 
-
+ 
   theorem sqrt2_not_rational:
     "sqrt 2 \<notin> \<rat>"
   by (min_script \<open>

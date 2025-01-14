@@ -393,7 +393,7 @@ subsection \<open>Longest Common Prefix\<close>
 
 definition Longest_common_prefix :: "'a list set \<Rightarrow> 'a list" where
 "Longest_common_prefix L = (ARG_MAX length ps. \<forall>xs \<in> L. prefix ps xs)"
-  
+   
     
 lemma Longest_common_prefix_ex: "L \<noteq> {} \<Longrightarrow>
   \<exists>ps. (\<forall>xs \<in> L. prefix ps xs) \<and> (\<forall>qs. (\<forall>xs \<in> L. prefix qs xs) \<longrightarrow> size qs \<le> size ps)"
@@ -464,7 +464,7 @@ by(metis Longest_common_prefix_prefix Longest_common_prefix_longest
 
 lemma Longest_common_prefix_Nil: "[] \<in> L \<Longrightarrow> Longest_common_prefix L = []"
 using Longest_common_prefix_prefix prefix_Nil by blast
-
+ 
 lemma Longest_common_prefix_image_Cons: "L \<noteq> {} \<Longrightarrow>
   Longest_common_prefix ((#) x ` L) = x # Longest_common_prefix L"
 by (min_script \<open>

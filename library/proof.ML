@@ -20,8 +20,8 @@ val END_completes_all_NEXT : bool Config.T
 val INIT : Proof.context -> thm -> state
 val INIT': Proof.state -> state
 
-datatype intros_mode = ALL_SUBGOALS | SINGLE_GOAL of binding list option
-val INTRO : intros_mode -> operation
+datatype intros_mode = ALL_SUBGOALS | SINGLE_GOAL
+val INTRO : intros_mode -> opt_var_names -> operation
 val INTRO_CMD : command
 
 val apply : context_tactic -> Time.time option -> stack -> stack
@@ -29,7 +29,7 @@ val apply_method : Method.method -> Time.time option -> stack -> stack
 val APPLY_CMD : command
 
 val crush_timeout : int Config.T
-val CRUSH : intros_mode * with_clause -> operation
+val CRUSH : opt_var_names * with_clause -> operation
 val CRUSH_CMD : command
 
 val UNFOLD : thm list -> operation
@@ -118,7 +118,10 @@ datatype frame = HHF   of thm (*a local_facts bundle node, represented as a Here
                | ENDBLK of endblk_type
 
 val trivial_goal = Goal.protect 0 @{thm TrueI}
+
+type opt_var_names = string option list option
 exception NO_PARAM
+exception CASE_NAME of opt_var_names
 
 type stack = Proof.context * (frame list)
   (*invariant: the head must be an HHF*)
@@ -388,7 +391,7 @@ fun need_intro st =
   end
 
 (*fix local variables & facts*)
-datatype intros_mode = ALL_SUBGOALS | SINGLE_GOAL of binding list option
+datatype intros_mode = ALL_SUBGOALS | SINGLE_GOAL
 
 fun strip_meta_hhf term =
   let fun strip (V,P) (Const("Pure.imp", _) $ H $ B) = strip (V,H::P) B
@@ -398,7 +401,7 @@ fun strip_meta_hhf term =
         | strip (V,P) X = (rev V, rev P, X)
    in strip ([],[]) term end
 
-fun INTRO'' F mode (origin as (ctxt, HHF (st0, pctxt) :: L)) =
+fun INTRO'' F mode bs (origin as (ctxt, HHF (st0, pctxt) :: L)) =
    (case Thm.nprems_of st0
       of 0 => origin
        | _ => if Thm.nprems_of st0 > 1 orelse need_intro st0
@@ -407,20 +410,18 @@ fun INTRO'' F mode (origin as (ctxt, HHF (st0, pctxt) :: L)) =
                                       [(false, @{thm allI}), (false, @{thm impI})] 1)
                              |> Seq.hd
 
-                       val (foc, st') = Subgoal.focus_prems ctxt 1
-                                          ((case mode of ALL_SUBGOALS => NONE
-                                                       | SINGLE_GOAL bs => bs)
-                                           |> (fn NONE => Thm.prop_of st
-                                                       |> Logic.dest_implies |> fst
-                                                       |> strip_meta_hhf
-                                                       |> #1 |> map #1
-                                                       |> (fn L => fold_map Name.variant L
-                                                                        (Variable.names_of ctxt))
-                                                       |> #1
-                                                       |> map Binding.name
-                                                       |> SOME
-                                                | some => some))
-                                          st
+                       val default_binds = Thm.prop_of st
+                                        |> Logic.dest_implies |> fst
+                                        |> strip_meta_hhf
+                                        |> #1 |> map #1
+                                        |> (fn L => fold_map Name.variant L
+                                                          (Variable.names_of ctxt))
+                                        |> #1
+                       val binds = case bs
+                                     of NONE => default_binds
+                                      | SOME bs' => map2 (fn NONE => I
+                                                           | SOME b => K b) bs' default_binds
+                       val (foc, st') = Subgoal.focus_prems ctxt 1 (SOME (map Binding.name binds)) st
                        val PRT = K (prepend_print pctxt
                                   o prepend_print (map (
                                          snd
@@ -429,21 +430,22 @@ fun INTRO'' F mode (origin as (ctxt, HHF (st0, pctxt) :: L)) =
                                       #> apfst (Variable.revert_fixed (#context foc)
                                    )) (#params foc), []) )
                        val (st'', (pctxt', ctxt')) = F (st', foc)
-                       fun CB ctxt'' (st'',_,S,_) =
+                       fun CB ctxt'' (st'',_,S, CASE_NAME bs) =
                         let val st'3 = singleton (Proof_Context.export ctxt'' ctxt') st''
                          in (ctxt, HHF (
                                    Subgoal.retrofit ctxt'' ctxt (#params foc) (#asms foc) 1 st'3 st
                                 |> Seq.hd,
                               ([],[])) :: S)
-                         |> mode = ALL_SUBGOALS ? INTRO'' F mode
+                         |> mode = ALL_SUBGOALS ? INTRO'' F mode bs
                         end
+                         | CB _ _ = raise BROKEN_INVARIANT
                     in if Thm.nprems_of st0 > 1
-                    then (ctxt', HHF (st'', pctxt') :: ENDBLK T_NXT :: MAGIC (CB,PRT,NO_PARAM) :: L)
-                    else (ctxt', HHF (st'', pctxt') :: MAGIC (CB,PRT,NO_PARAM) :: L)
+                    then (ctxt', HHF (st'', pctxt') :: ENDBLK T_NXT :: MAGIC (CB,PRT,CASE_NAME NONE) :: L)
+                    else (ctxt', HHF (st'', pctxt') :: MAGIC (CB,PRT,CASE_NAME NONE) :: L)
                    end
               else (ctxt, HHF (st0, pctxt) :: L)
     )
-  | INTRO'' _ _ _ = raise BROKEN_INVARIANT
+  | INTRO'' _ _ _ _ = raise BROKEN_INVARIANT
 
 val INTRO' = INTRO'' (fn (st, foc) =>
   let val ctxt = #context foc
@@ -496,8 +498,8 @@ fun CONTEXTUAL_CMD (parser : Proof.context -> command)
 
 
 val VARS_KWD = (Parse.$$$ "VARS" || Parse.$$$ "vars")
+val OPT_VARS = Scan.option (VARS_KWD |-- Scan.repeat (Parse.maybe Parse.name))
 val VARS = VARS_KWD |-- Scan.repeat Parse.binding
-val VARS_FOR_SINGLE_GOAL = Scan.option VARS >> SINGLE_GOAL
 val IN = (Parse.$$$ "IN" || Parse.$$$ "in")
 
 
@@ -594,27 +596,17 @@ val UNFOLD_CMD = Parse.thms1 -- Scan.option (IN |-- Scan.repeat1 Parse.name) >> 
 
 (* INIT PROCESS *)
 
-fun TRY_STANDARD (SK as (ctxt, HHF (st, _) :: _)) =
- (let val thy = Proof_Context.theory_of ctxt
-      val [\<^Const>\<open>Trueprop\<close> $ goal] = Thm.prems_of st
-      val Const(name, _) = head_of goal
-      fun pass [] = []
-        | pass ["class", x] = [x]
-        | pass (h::L) = h :: pass L
-      fun qchk [] = false
-        | qchk ["class", _] = true
-        | qchk (_::L) = qchk L
-      val idts = Long_Name.explode name
-      val name' = if qchk idts then Long_Name.implode (pass idts) else name
-   in if Locale.defined thy name'
-    then apply' (CONTEXT_TACTIC (Classical.standard_tac ctxt [])) NONE SK
-    else SK
-  end handle Bind => SK )
-  | TRY_STANDARD _ = raise BROKEN_INVARIANT
+fun NEED_STANDARD (ctxt, HHF (st, _) :: _) = Phi_Sledgehammer_Solver.need_standard_tac ctxt st
+  | NEED_STANDARD _ = false
 
-fun INTRO mode = OPR (INTRO' mode o TRY_STANDARD)
-val INTRO_CMD = VARS_FOR_SINGLE_GOAL >> INTRO
-val INTRO_ALL_CMD = Scan.succeed (OPR (INTRO' ALL_SUBGOALS))
+fun TRY_STANDARD SK =
+  if NEED_STANDARD SK
+  then apply' (CONTEXT_TACTIC (Classical.standard_tac (#1 SK) [])) NONE SK
+  else SK
+
+val INTRO = OPR oo INTRO'
+val INTRO_CMD = OPT_VARS >> (OPR o INTRO' SINGLE_GOAL)
+val INTRO_ALL_CMD = OPT_VARS >> (OPR o INTRO' ALL_SUBGOALS)
 
 local
 (*
@@ -697,7 +689,7 @@ end
 val crush_timeout = Attrib.setup_config_int \<^binding>\<open>crush_timeout\<close> (K 10) (*in seconds*)
 
 fun CRUSH' _ _ (ctxt, []) = (ctxt, [])
-  | CRUSH' prep_with (imode, raw_with_lems) SK0 =
+  | CRUSH' prep_with (vars, raw_with_lems) SK0 =
   TRY_STANDARD SK0 |> (fn (s as (ctxt, _)) =>
   let val with_lems = prep_with ctxt raw_with_lems
       val ctxt = apply_WITH with_lems ctxt
@@ -709,24 +701,22 @@ fun CRUSH' _ _ (ctxt, []) = (ctxt, [])
       raw_apply (CONTEXT_TACTIC (Clasimp.clarsimp_tac ctxt 1)) (SOME time) s)
       handle OPR_FAIL E =>
                 (case s of (_, HHF (st, _) :: _) =>
-                                if need_intro st then s else raise OPR_FAIL E
+                                if need_intro st orelse NEED_STANDARD SK0
+                                then s
+                                else raise OPR_FAIL E
                          | _ => raise OPR_FAIL E )
            | Timeout.TIMEOUT _ =>
                 raise OPR_FAIL "Timeout")
-   |> SKIP_SUCCESS (INTRO' imode)
+   |> SKIP_SUCCESS (INTRO' ALL_SUBGOALS vars)
   end)
 
 val CRUSH = OPR o (CRUSH' (K I))
 
 val CRUSH_CMD =
-      ( Scan.optional (VARS >> (SINGLE_GOAL o SOME)) ALL_SUBGOALS
-     -- with_parser )
+      ( OPT_VARS -- with_parser )
      >> (OPR o CRUSH' read_with)
 
 (* INDUCT & CASE *)
-
-type opt_var_names = string option list option
-exception CASE_NAME of opt_var_names
 
 fun map2_opt _ [] [] = []
   | map2_opt f [] (y :: ys) = f NONE y :: map2_opt f [] ys
@@ -946,8 +936,6 @@ fun CASE_SPLIT' (no_simp, (insts, opt_rule)) =
    in CASES' (K (K [])) tac
   end
 
-val OPT_VARS = Scan.option (VARS_KWD |-- Scan.repeat (Parse.maybe Parse.name))
-
 val INDUCT = OPR oo INDUCT'
 val INDUCT_CMD = CONTEXTUAL_CMD (fn ctxt =>
          ind_synt (Context.Proof ctxt) -- OPT_VARS
@@ -967,36 +955,34 @@ end
 fun RULE'_i rules facts =
   apply' (fn s => CONTEXT_TACTIC (HEADGOAL (Classical.rule_tac (#1 s) rules facts)) s) NONE
 
-fun RULE'' [] raw_facts (SK as (ctxt, _)) =
-  let val facts = Attrib.eval_thms ctxt raw_facts
-   in RULE'_i [] facts SK
-  end
-  | RULE'' raw_rules raw_facts (ctxt, HHF (st, pctxt) :: SK) =
-  let val facts = Attrib.eval_thms ctxt raw_facts
-      val rules = maps (fn raw_rule =>
-            let val name = name_of_ref (fst raw_rule)
-             in map (fn rule0 =>
-                  let open Phi_Sledgehammer_Solver
-                      val rule = rule0 OF facts
-                   in case infer_type_of_rule name rule0
-                   of T_ELIM => (true, rule)
-                    | T_DEST => (true, Tactic.make_elim rule)
-                    | _      => (false, rule)
-                  end
-                ) (Attrib.eval_thms ctxt raw_rules)
-            end ) raw_rules
-   in st
-   |> Thm.biresolution NONE false rules 1
-   |> Seq.pull
-   |> (fn SOME (st', _) => (ctxt, HHF (st', pctxt) :: SK)
-        | NONE => raise OPR_FAIL "Fail to apply the rules" )
-   |> maintain
-  end
-  | RULE'' _ _ _ = raise BROKEN_INVARIANT
-
-fun RULE' rules facts SK = SK
-      |> TRY_STANDARD
-      |> RULE'' rules facts
+fun RULE' [] raw_facts (SK as (ctxt, _)) =
+    if NEED_STANDARD SK
+    then TRY_STANDARD SK
+    else let val facts = Attrib.eval_thms ctxt raw_facts
+     in RULE'_i [] facts SK
+    end
+  | RULE' raw_rules raw_facts (ctxt, HHF (st, pctxt) :: SK) =
+    let val facts = Attrib.eval_thms ctxt raw_facts
+        val rules = maps (fn raw_rule =>
+              let val name = name_of_ref (fst raw_rule)
+               in map (fn rule0 =>
+                    let open Phi_Sledgehammer_Solver
+                        val rule = rule0 OF facts
+                     in case infer_type_of_rule name rule0
+                     of T_ELIM => (true, rule)
+                      | T_DEST => (true, Tactic.make_elim rule)
+                      | _      => (false, rule)
+                    end
+                  ) (Attrib.eval_thms ctxt raw_rules)
+              end ) raw_rules
+     in st
+     |> Thm.biresolution NONE false rules 1
+     |> Seq.pull
+     |> (fn SOME (st', _) => (ctxt, HHF (st', pctxt) :: SK)
+          | NONE => raise OPR_FAIL "Fail to apply the rules" )
+     |> maintain
+    end
+  | RULE' _ _ _ = raise BROKEN_INVARIANT
 
 val RULE = OPR oo RULE'
 val RULE_CMD = let open Parse
@@ -1302,14 +1288,13 @@ fun CONSIDER' raw_terms (ctxt, HHF (st,facts,IA) :: SK) =
 *)
 (* HAMMER *)
 
-fun HAMMER_i override step_id SK =
-  TRY_STANDARD SK |> (fn (ctxt, HHF (s,facts) :: S) =>
+fun HAMMER_i override step_id (ctxt, HHF (s,facts) :: S) =
   let val SOME (_, _, ID_BASE) = IPS_Data.get ctxt
       val ID = ID_BASE ^ "/" ^ step_id
       val s' = Phi_Sledgehammer_Solver.auto override (SOME ID) ctxt s
    in maintain (ctxt, HHF (s', facts) :: S)
   end
-    | _ => raise BROKEN_INVARIANT)
+  | HAMMER_i _ _ _ = raise BROKEN_INVARIANT
   
 
 fun HAMMER_all override step_id =

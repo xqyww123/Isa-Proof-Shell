@@ -54,12 +54,12 @@ text \<open>
   assumes "equivalent_bicategories V\<^sub>C H\<^sub>C \<a>\<^sub>C \<i>\<^sub>C src\<^sub>C trg\<^sub>C V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D"
   and "bicategory_of_spans V\<^sub>C H\<^sub>C \<a>\<^sub>C \<i>\<^sub>C src\<^sub>C trg\<^sub>C"
   shows "bicategory_of_spans V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D"
-apply standard
-
+  
 apply (min_script \<open>
   USE_THY C: bicategory_of_spans V\<^sub>C H\<^sub>C \<a>\<^sub>C \<i>\<^sub>C src\<^sub>C trg\<^sub>C END
   USE_THY D: bicategory V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D
-             END WITH equivalent_bicategories_def
+             END WITH equivalent_bicategories_def equivalence_pseudofunctor.axioms(1)
+                      pseudofunctor.axioms(2)
   USE_THY D: chosen_right_adjoints V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D END
   CONSIDER F \<Phi> where F: "equivalence_pseudofunctor
                            V\<^sub>C H\<^sub>C \<a>\<^sub>C \<i>\<^sub>C src\<^sub>C trg\<^sub>C V\<^sub>D H\<^sub>D \<a>\<^sub>D \<i>\<^sub>D src\<^sub>D trg\<^sub>D F \<Phi>" END WITH equivalent_bicategories_def
@@ -88,7 +88,10 @@ apply (min_script \<open>
     NOTATION C.some_right_adjoint ("_\<^sup>*\<^sup>C" [1000] 1000)
     NOTATION D.some_right_adjoint ("_\<^sup>*\<^sup>D" [1000] 1000)
 
-  
+  CRUSH VARS r'
+    CONSIDER f g where fg: "C.is_left_adjoint f \<and> C.is_left_adjoint g \<and> F.right_map r' \<cong>\<^sub>C g \<star>\<^sub>C f\<^sup>*\<^sup>C" END
+    HAVE "trg\<^sub>C g = E.G.map\<^sub>0 (trg\<^sub>D r')" END WITH fg C.isomorphic_implies_ide C.isomorphic_implies_hpar
+    HAVE "trg\<^sub>C f = E.G.map\<^sub>0 (src\<^sub>D r')" END WITH fg C.isomorphic_implies_ide C.isomorphic_implies_hpar
 \<close>)
 
 
