@@ -77,23 +77,24 @@ fun structured_statement ctxt =
     let val (stmt, ctxt') = Proof_Context.read_statement fixes assumes (map snd shows) ctxt
         val ctxt'P = Proof_Context.set_mode (Proof_Context.mode_pattern) ctxt'
         fun read ctxt = ` (Syntax.read_term ctxt)
-     in (map2 (fn fix => fn (_,t,s) => (swap fix,t,s)) (#fixes stmt) fixes,
-         map (map (apfst (read ctxt') #> apsnd (map (read ctxt'P)))) assumes,
-         map (apsnd (map (apfst (read ctxt') #> apsnd (map (read ctxt'P))))) shows)
+     in (ctxt',
+          (map2 (fn fix => fn (_,t,s) => (swap fix,t,s)) (#fixes stmt) fixes,
+           map (map (apfst (read ctxt') #> apsnd (map (read ctxt'P)))) assumes,
+           map (apsnd (map (apfst (read ctxt') #> apsnd (map (read ctxt'P))))) shows))
     end )
 
-val tactic_parser = K (Method.parse >> (TACTIC o fst))
+fun tactic_parser ctxt = Method.parse >> (pair ctxt o TACTIC o fst)
 
-val fix_parser = K (VARS >> FIX)
-fun assume_parser ctxt = structured_statement ctxt >> ASSUME
-val unfold_parser = K (facts >> (UNFOLD o flat))
-val using_parser  = K (facts >> (USING  o flat))
-val case_parser = K ((
+fun fix_parser ctxt = VARS >> (pair ctxt o FIX)
+fun assume_parser ctxt = structured_statement ctxt >> apsnd ASSUME
+fun unfold_parser ctxt = facts >> (pair ctxt o UNFOLD o flat)
+fun using_parser  ctxt = facts >> (pair ctxt o USING  o flat)
+fun case_parser   ctxt = (
         Parse_Spec.opt_thm_name ":" --
       ( \<^keyword>\<open>(\<close> |-- Parse.!!! (Parse.name
                     -- Scan.repeat (Parse.maybe Parse.name) --| \<^keyword>\<open>)\<close>)
      || Parse.name >> rpair []))
-      >> CASE)
+      >> (pair ctxt o CASE)
 
 fun define_parser ctxt = (Parse.vars --| Parse.where_) -- Parse_Spec.statement -- Parse.for_fixes
       >> (fn ((a,b),c) =>
@@ -104,6 +105,7 @@ fun define_parser ctxt = (Parse.vars --| Parse.where_) -- Parse_Spec.statement -
              b |> map (apsnd (map (apfst (read ctxt') #> apsnd (map (read ctxt'P))))),
              c |> map2 (fn fix => fn (_,t,s) => (swap fix,t,s)) (take (length a) (#fixes stmt)) )
          |> DEFINE
+         |> pair ctxt'
         end)
 
 exception IGNORE
@@ -122,9 +124,10 @@ val initial_parsers = Symtab.make [
   ("unfolding",  unfold_parser),
   ("using",      using_parser),
   ("case",       case_parser),
-  ("write",      K (Parse.syntax_mode -- Parse.and_list1 (Parse.const -- Parse.mixfix) >> NOTATION)),
-  ("let",        K (Parse.and_list1 (Parse.and_list1 Parse.term -- (\<^keyword>\<open>=\<close> |-- Parse.term))
-                      >> LET)),
+  ("write",      (fn ctxt => Parse.syntax_mode -- Parse.and_list1 (Parse.const -- Parse.mixfix)
+                      >> (pair ctxt o NOTATION) )),
+  ("let",        (fn ctxt => Parse.and_list1 (Parse.and_list1 Parse.term -- (\<^keyword>\<open>=\<close> |-- Parse.term))
+                      >> (pair ctxt o LET) )),
   ("define",     define_parser),
   ("supply",     K (Parse_Spec.name_facts >> CONFIG)),
   ("note",       K (Parse_Spec.name_facts >> CONFIG)),
@@ -199,6 +202,7 @@ val initial_parsers = Symtab.make [
   ("welcome",                  ignore)
 ]
 
+datatype blk_behv = OPEN_BLK
 
 fun initial_pass toks s =
   let fun parse s ret (src::srcs) =

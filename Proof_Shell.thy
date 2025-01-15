@@ -10,6 +10,14 @@ definition \<open>TAG X \<equiv> X\<close>
 
 ML_file \<open>./library/proof.ML\<close>
 
+notepad
+begin
+
+  let ?x = \<open>1::nat\<close>
+  let ?y = \<open>?x\<close>
+
+end
+
 supply
 interpret
 print_facts
