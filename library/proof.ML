@@ -405,6 +405,13 @@ fun need_intro st =
   end
 
 (*fix local variables & facts*)
+
+fun map2_opt _ [] [] = []
+  | map2_opt f [] (y :: ys) = f NONE y :: map2_opt f [] ys
+  | map2_opt f (x :: xs) (y :: ys) = f x y :: map2_opt f xs ys
+  | map2_opt _ _ _ = raise ListPair.UnequalLengths
+
+
 datatype intros_mode = ALL_SUBGOALS | SINGLE_GOAL
 
 fun strip_meta_hhf term =
@@ -433,8 +440,8 @@ fun INTRO'' F mode bs (origin as (ctxt, HHF (st0, pctxt) :: L)) =
                                         |> #1
                        val binds = case bs
                                      of NONE => default_binds
-                                      | SOME bs' => map2 (fn NONE => I
-                                                           | SOME b => K b) bs' default_binds
+                                      | SOME bs' => map2_opt (fn NONE => I
+                                                               | SOME b => K b) bs' default_binds
                        val (foc, st') = Subgoal.focus_prems ctxt 1 (SOME (map Binding.name binds)) st
                        val PRT = K (prepend_print pctxt
                                   o prepend_print (map (
@@ -731,11 +738,6 @@ val CRUSH_CMD =
      >> (OPR o CRUSH' read_with)
 
 (** INDUCT & CASE **)
-
-fun map2_opt _ [] [] = []
-  | map2_opt f [] (y :: ys) = f NONE y :: map2_opt f [] ys
-  | map2_opt f (x :: xs) (y :: ys) = f x y :: map2_opt f xs ys
-  | map2_opt _ _ _ = raise ListPair.UnequalLengths
 
 fun CASES' ADDITIONAL_NOTES tac first_vars (SK as (ctxt0, HHF (st00, _) :: _)) =
   apply' tac NONE SK |> (fn (ctxt, SK as HHF (rule, pctxt0) :: REMAIN_SK) =>
@@ -1593,7 +1595,7 @@ val CMDS = Symtab.make [
       ("UNFOLD",  UNFOLD_CMD),
       ("CHOOSE",  CHOOSE_CMD),
       ("NOTATION",NOTATION_CMD),
-      ("USE_THY", USE_THEORY_CMD),
+      ("LOAD_MODULE", USE_THEORY_CMD),
       ("DEFINE",  DEFINE_CMD),
       ("CONFIG",  CONFIG_CMD)
     ]
@@ -1652,7 +1654,7 @@ val keywords = let open Keyword
            (("UNFOLD",\<^here>), command_spec (prf_goal, [])),
            (("CHOOSE",\<^here>), command_spec (prf_decl, [])),
            (("NOTATION",\<^here>), command_spec (prf_decl, [])),
-           (("USE_THY",\<^here>), command_spec (prf_goal, [])),
+           (("LOAD_MODULE",\<^here>), command_spec (prf_goal, [])),
            (("DEFINE",\<^here>), command_spec (prf_decl, [])),
            (("CONFIG",\<^here>), command_spec (prf_decl, []))
          ]

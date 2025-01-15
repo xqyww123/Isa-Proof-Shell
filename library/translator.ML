@@ -4,7 +4,6 @@ end
 
 structure ML_Translator : ML_TRANSLATOR = struct
 
-
 type source = string
 type typ'  = typ * source
 type term' = term * source
@@ -16,6 +15,9 @@ type attr_statement = (Attrib.binding * (term' * term' list) list) list
 type structured_statement = var' list      (*vars*)
                           * statement      (*assumes*)
                           * attr_statement (*shows*)
+
+exception Translation_Fail of string
+exception Unsupported of string
 
 datatype ast =
 (* Isar Specific *)
@@ -107,9 +109,7 @@ fun define_parser ctxt = (Parse.vars --| Parse.where_) -- Parse_Spec.statement -
 exception IGNORE
 fun ignore _ _ = raise IGNORE
 
-exception Unsupported
-fun TODO _ _ = raise Unsupported
-fun unsupported _ _ = raise Unsupported
+fun TODO name _ _ = raise Unsupported name
 
 val initial_parsers = Symtab.make [
 
@@ -128,6 +128,7 @@ val initial_parsers = Symtab.make [
   ("define",     define_parser),
   ("supply",     K (Parse_Spec.name_facts >> CONFIG)),
   ("note",       K (Parse_Spec.name_facts >> CONFIG)),
+  ("include",    K (Parse_Spec.name_facts >> CONFIG)),
 
   ("defer",      K (Scan.optional Parse.nat 1 >> DEFER)),
   ("prefer",     K (Scan.optional Parse.nat 1 >> DEFER)),
@@ -147,14 +148,13 @@ val initial_parsers = Symtab.make [
   (".",          K (Scan.succeed (END ([],[])))),
   ("..",         K (Scan.succeed (END ([],[])))),
 
-  ("{",          TODO),
-  ("}",          TODO),
-  ("proof",      TODO),
-  ("qed",        TODO),
-  ("subgoal",    TODO),
+  ("{",          TODO "{"),
+  ("}",          TODO "}"),
+  ("proof",      TODO "proof"),
+  ("qed",        TODO "qed"),
+  ("subgoal",    TODO "subgoal"),
 
-  ("oops",       TODO),
-  ("sorry",      unsupported),
+  ("oops",       TODO "oops"),
 
   ("also",       ignore),
   ("finally",    ignore),
@@ -199,6 +199,19 @@ val initial_parsers = Symtab.make [
   ("welcome",                  ignore)
 ]
 
+
+fun initial_pass toks s =
+  let fun parse s ret (src::srcs) =
+        let val (name,_) = Token.name_of_src src
+            val parser = case Symtab.lookup initial_parsers name
+                           of SOME parser => parser
+                            | NONE => raise Unsupported name
+            val tr = Outer_Syntax.parse_span (Toplevel.theory_of s) (fn _ => error "BUG") src
+            val s' = Toplevel.command_exception false tr s
+         in parse s' (parser (Toplevel.context_of s) (tl src) :: ret) srcs
+        end
+   in toks
+  end
 
 end
 

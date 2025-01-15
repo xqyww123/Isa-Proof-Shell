@@ -2,16 +2,29 @@ theory MS_Test_Divisibility
   imports "HOL-Algebra.Divisibility" Proof_Shell
 begin
 
+lemma
+  \<open>True\<close>
+  by (min_script \<open>
+  DEFINE a where "a = (1::nat)"
+  END
+\<close>)
+
+
 
 theorem factorial_condition_two: (* Jacobson theorem 2.22 *)
   "divisor_chain_condition_monoid G \<and> gcd_condition_monoid G \<longleftrightarrow> factorial_monoid G"
-apply (min_script \<open>
+by (min_script \<open>
   RULE iffI
   CRUSH
-  USE_THY divisor_chain_condition_monoid "G" END
-  USE_THY gcd_condition_monoid "G" END
+    LOAD_MODULE divisor_chain_condition_monoid "G" END
+    LOAD_MODULE gcd_condition_monoid "G" END
   NEXT
+    LOAD_MODULE factorial_monoid "G" END
+  END
 \<close>)
+
+theorem factorial_condition_two': (* Jacobson theorem 2.22 *)
+  "divisor_chain_condition_monoid G \<and> gcd_condition_monoid G \<longleftrightarrow> factorial_monoid G"
 proof (rule iffI, clarify)
   assume dcc: "divisor_chain_condition_monoid G"
     and gc: "gcd_condition_monoid G"
