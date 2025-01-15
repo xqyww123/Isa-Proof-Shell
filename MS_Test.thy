@@ -392,4 +392,15 @@ lemma \<open>XXX a = XXX (XXX a)\<close>
 lemma \<open>XXX a = XXX (XXX a)\<close>
   by (min_script \<open>END WITH XXX_def\<close>)
 
+
+attribute_setup test = \<open>Scan.succeed (Thm.declaration_attribute (K @{print}))\<close>
+bundle test = [[test]]
+
+lemma \<open>True\<close>
+  by (min_script \<open>
+  CONFIG [[test]]
+  CONFIG test
+  END
+\<close>)
+
 end

@@ -10,6 +10,7 @@ definition \<open>TAG X \<equiv> X\<close>
 
 ML_file \<open>./library/proof.ML\<close>
 
+supply
 interpret
 print_facts
   write

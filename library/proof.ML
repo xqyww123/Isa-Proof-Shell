@@ -77,6 +77,11 @@ val LET_CMD : command
 val PRINT : operation
 val PRINT_CMD : command
 
+datatype config = CFG_NOTE   of Thm.binding * (thm list * attribute list) list
+                | CFG_BUNDLE of Bundle.name
+val CONFIG : config list -> operation
+val CONFIG_CMD : command
+
 val RULE : (Facts.ref * Token.src list) list -> (Facts.ref * Token.src list) list -> operation
 val RULE_CMD : command
 
@@ -551,13 +556,13 @@ fun quanlifiers_of tree =
    in fold_all_names (merge o Long_Name.explode) tree []
   end
 
-(** Interfaces **)
+(*** COMMANDS ***)
 
 
 (*fun INTRO_ALL (ctxt, HHF (st, facts) :: L) = *)
 
 
-(* APPLY *)
+(** APPLY **)
 
 fun APPLY text =
       OPR (fn SK as (ctxt, _) =>
@@ -565,7 +570,7 @@ fun APPLY text =
 
 val APPLY_CMD = Method.parse >> (fn (m,_) => APPLY m)
 
-(* UNFOLD *)
+(** UNFOLD **)
 
 fun UNFOLD' prep_thms raw_defs (ctxt, HHF (st, pctxt) :: S) =
   let val defs = prep_thms ctxt raw_defs
@@ -603,9 +608,9 @@ val UNFOLD_CMD = Parse.thms1 -- Scan.option (IN |-- Scan.repeat1 Parse.name) >> 
        | (defs, SOME facts) => OPR (UNFOLD_FACT' Attrib.eval_thms defs facts) )
 
 
-(* INIT PROCESS *)
+(** INITIATION PROCESS **)
 
-fun NEED_STANDARD (ctxt, HHF (st, _) :: _) = Phi_Sledgehammer_Solver.need_standard_tac ctxt st
+fun NEED_STANDARD (ctxt, HHF (st, _) :: _) = false (*FIXME*) (* Phi_Sledgehammer_Solver.need_standard_tac ctxt st *)
   | NEED_STANDARD _ = false
 
 fun TRY_STANDARD SK =
@@ -693,7 +698,7 @@ fun INIT_SYNTAX ctxt = ctxt
 
 end
 
-(* Crush *)
+(** Crush **)
 
 val crush_timeout = Attrib.setup_config_int \<^binding>\<open>crush_timeout\<close> (K 10) (*in seconds*)
 
@@ -725,7 +730,7 @@ val CRUSH_CMD =
       ( OPT_VARS -- with_parser )
      >> (OPR o CRUSH' read_with)
 
-(* INDUCT & CASE *)
+(** INDUCT & CASE **)
 
 fun map2_opt _ [] [] = []
   | map2_opt f [] (y :: ys) = f NONE y :: map2_opt f [] ys
@@ -768,10 +773,10 @@ fun CASES' ADDITIONAL_NOTES tac first_vars (SK as (ctxt0, HHF (st00, _) :: _)) =
                               let val name = Binding.name_of B
                                   val name = if Name.is_internal name then Name.dest_internal name
                                                                       else name
-                                  (* val (name, names) = if name = ""
+                                  (*val (name, names) = if name = ""
                                                       then Name.variant "case" names
-                                                      else (name, names) *)
-                                  (* val (name, names) = Name.variant name names *)
+                                                      else (name, names)*)
+                                  (*val (name, names) = Name.variant name names*)
                                in ((Binding.name name,T), names)
                               end ) fixes (Variable.names_of ctxt)
                               |> #1 ),
@@ -959,7 +964,7 @@ val CASE_SPLIT_CMD = CONTEXTUAL_CMD (fn ctxt =>
 
 end
 
-(* RULE *)
+(** RULE **)
 
 fun RULE'_i rules facts =
   apply' (fn s => CONTEXT_TACTIC (HEADGOAL (Classical.rule_tac (#1 s) rules facts)) s) NONE
@@ -1000,7 +1005,7 @@ val RULE_CMD = let open Parse
      end
 
 
-(* HAVE *)
+(** HAVE **)
 
 fun HAVE'' _ _ _ (ctxt, []) = (ctxt, [])
   | HAVE'' AP raw_name expr (ctxt, HHF (G,pctxt) :: S) =
@@ -1039,7 +1044,7 @@ val HAVE_CMD =
         Parse.term
      >> (fn (name, expr) => HAVE name expr)
 
-(* OBTAIN *)
+(** CONSIDER **)
 
 fun atomize_term ctxt =
       Object_Logic.atomize_term ctxt
@@ -1047,35 +1052,7 @@ fun atomize_term ctxt =
               then X
               else raise OPR_FAIL "Fail to atomize the proposition into HOL")
 
-
-(* can be cached *)
-(*
-fun mk_obtain_rule ctxt CN EN =
-  let val TS = List.tabulate (EN, fn i =>
-                  (i, TVar (("'x" ^ string_of_int i, 0), \<^sort>\<open>type\<close>)))
-      fun var TS name = Var((name,0), (map #2 TS) ---> \<^Type>\<open>bool\<close>)
-                     |> fold (fn (i,_) => fn X => X $ Bound (EN - 1 - i)) TS
-      val C = HOLogic.mk_Trueprop (var [] "C")
-      val PS = List.tabulate (CN, fn i => var TS ("P" ^ string_of_int i))
-      fun import_vars ctxt th =
-        let val ((_, [th']), ctxt') = ctxt |> Variable.set_body false |> Variable.import true [th];
-         in (ctxt', th') end;
-
-   in foldr1 (fn (A,B) => \<^Const>\<open>conj\<close> $ A $ B) PS
-   |> fold_rev (fn (i,T) => fn X => \<^Const>\<open>Ex T\<close> $ Abs ("x" ^ string_of_int i, T, X)) TS
-   |> (fn X => Logic.mk_implies (HOLogic.mk_Trueprop X, C))
-   |> Thm.cterm_of ctxt
-   |> Thm.trivial
-   |> import_vars ctxt
-   |-> (fn ctxt' => fn th => th
-   |> Seq.REPEAT (Thm.biresolution NONE true [(true, @{thm exE}), (true, @{thm conjE})] 1)
-   |> Seq.hd
-   |> Thm.permute_prems 0 1
-   |> singleton (Variable.export ctxt' ctxt))
-  end
-*)
-
-(* can be cached *)
+(*can be cached*)
 fun mk_consider_rule ctxt DNF_SPEC =
   let fun var TS name =
         let val EN = length TS
@@ -1109,22 +1086,6 @@ fun mk_consider_rule ctxt DNF_SPEC =
    |> Thm.permute_prems 0 ~1
    |> singleton (Variable.export ctxt' ctxt))
   end
-
-(*
-val elim_Ex = @{lemma \<open>Ex (\<lambda>x. P x) \<Longrightarrow> (\<And>x. P x \<Longrightarrow> Q) \<Longrightarrow> Q\<close>
-                   by (unfold Ex_def, blast)}
-val conjD1 = @{lemma \<open>conj A B \<Longrightarrow> A\<close> by (unfold conj_def, blast)}
-val conjD2 = @{lemma \<open>conj A B \<Longrightarrow> B\<close> by (unfold conj_def, blast)}
-*)
-
-(*
-local val prop_def = @{thm prop_def}
-   in val protect_goal   = Conv.gconv_rule (Conv.rewr_conv (Thm.symmetric prop_def))
-      val unprotect_goal = Conv.gconv_rule (Conv.rewr_conv prop_def)
-end
-*)
-
-(* raw_decls raw_fixes raw_prems raw_statements *)
 
 fun CONSIDER' raw_dnf (ctxt0, HHF (st0, pctxt0) :: S) =
   let val SOME (_, jj, _) = IPS_Data.get ctxt0
@@ -1247,55 +1208,7 @@ fun CONSIDER_CMD toks = (
         >> (fn (vs,(a,b,c)) => (vs,a,b,c)))
      >> CONSIDER) toks
 
-(* CONSIDER *)
-
-(*
-val elim_disj = @{lemma \<open>disj P Q \<Longrightarrow> (P \<Longrightarrow> C) \<Longrightarrow> (Q \<Longrightarrow> C) \<Longrightarrow> C\<close>
-                     by (unfold disj_def, blast)}
-
-
-fun CONSIDER' raw_terms (ctxt, HHF (st,facts,IA) :: SK) =
-  let val terms = Syntax.read_props ctxt raw_terms
-               |> map (atomize_term ctxt)
-      val goal  = foldr1 (fn (A, B) => \<^Const>\<open>HOL.disj\<close> $ A $ B ) terms
-               |> HOLogic.mk_Trueprop
-               |> Thm.cterm_of ctxt
-               |> Goal.init
-
-      val SOME (ii, _, _) = IPS_Data.get ctxt
-      val binder = Binding.name (assm_name (!ii))
-      val _ = ii := (!ii) + 1
-
-      fun CB ctxt' (lem, facts', _, S) =
-        let val lem = Goal.conclude lem
-            val st' = Method.insert_tac ctxt' [lem] 1 st
-                   |> Seq.hd
-                   |> REPEAT_DETERM (eresolve_tac ctxt' [elim_Ex] 1)
-                   |> Seq.hd
-         in (ctxt', HHF (st', facts' @ facts, IA) :: S)
-         |> INTRO'' (fn foc =>
-            let val lem = case #prems foc
-                            of [lem] => lem
-                             | _ => error "5ViUXLLqRB+AA9ffsaEPDQ"
-                fun split th =
-                  case Thm.prop_of th
-                    of Const(\<^const_name>\<open>Trueprop\<close>, _) $ (Const(\<^const_name>\<open>conj\<close>, _) $ _ $ _) =>
-                        MP conjD1 th :: split (MP conjD2 th)
-                     | _ => [th]
-                val facts = binders ~~ map (map (fn X => ([X],[]))) (unflat raw_props (split lem))
-             in #context foc
-             |> Proof_Context.note_thmss "" facts
-             |> apfst (map (apsnd (map Thm.prop_of)))
-            end)
-        end
-      fun PRT t = BUNDL ([], [], [t, print_stack [HHF (st,facts,IA)]])
-               |> augment_print (map (apsnd Term.fastype_of o snd) (#vars stmt),
-                                 [])
-   in (ctxt, HHF (goal, [], false) :: ENDBLK :: MAGIC (CB, PRT) :: SK)
-  end
-
-*)
-(* HAMMER *)
+(** HAMMER **)
 
 fun HAMMER_i override step_id (ctxt, HHF (s,facts) :: S) =
   let val SOME (_, _, ID_BASE) = IPS_Data.get ctxt
@@ -1319,7 +1232,7 @@ fun HAMMER_all override step_id =
 fun HAMMER override = OPR_ID (HAMMER_i override o string_of_int)
 val HAMMER_CMD = orverride_parser >> HAMMER
 
-(* END *)
+(** END **)
 
 fun END' param SH_override T jj ID (stack as (_, HHF _ :: _)) =
   let val ID_BASE = if jj = 0 then string_of_int ID 
@@ -1349,7 +1262,7 @@ fun NXT param SH_override = OPR_ID (END' (CASE_NAME param) SH_override T_NXT 0)
 val END_CMD  = orverride_parser >> END
 val NXT_CMD  = OPT_VARS -- orverride_parser >> uncurry NXT 
 
-(* LET *)
+(** LET **)
 
 local
 
@@ -1390,7 +1303,7 @@ val LET_CMD =
 
 end
 
-(* CHOOSE -- Instantiate Existential Quantification *)
+(** CHOOSE -- Instantiate Existential Quantification **)
 
 fun CHOOSE' prep_terms raw_terms (ctxt, HHF (st, pctxt) :: SK) =
   let val terms = prep_terms ctxt raw_terms
@@ -1404,7 +1317,7 @@ fun CHOOSE' prep_terms raw_terms (ctxt, HHF (st, pctxt) :: SK) =
 val CHOOSE = OPR o CHOOSE' (K I)
 val CHOOSE_CMD = Scan.repeat1 Parse.term >> (OPR o CHOOSE' Syntax.read_terms)
 
-(* PRINT *)
+(** PRINT **)
 
 fun fixes_is_outdated ctxt var_name =
   Name.is_skolem var_name andalso Variable.revert_fixed ctxt var_name = var_name
@@ -1456,7 +1369,7 @@ fun PRINT (state as ((ctxt,SK), _, ID)) =
   end
 val PRINT_CMD = Scan.succeed PRINT
 
-(* WRITE *)
+(** NOTATION **)
 
 local
 
@@ -1482,7 +1395,7 @@ val NOTATION_CMD = Parse.syntax_mode -- Parse.and_list1 (Parse.const -- Parse.mi
 
 end
 
-(* USE_THEORY *)
+(** OPEN_MODULE **)
 
 local
 
@@ -1613,7 +1526,7 @@ val USE_THEORY = OPR o USE_THEORY' interpretation
 val USE_THEORY_CMD = Parse.!!! Parse_Spec.locale_expression
                   >> (OPR o USE_THEORY' interpretation_cmd)
 
-(* LOCAL DEFINE *)
+(** LOCAL DEFINITION **)
 
 fun DEFINE' define (ctxt, SK) =
   (Proof.init ctxt
@@ -1625,7 +1538,34 @@ fun DEFINE names exprs fixes = OPR (DEFINE' (Proof.define names fixes exprs))
 val DEFINE_CMD = (Parse.vars --| Parse.where_) -- Parse_Spec.statement -- Parse.for_fixes
               >> (fn ((a,b),c) => OPR (DEFINE' (Proof.define_cmd a c b)))
 
-(** Toplevel **)
+
+(** CONFIG **)
+
+datatype config = CFG_NOTE   of Thm.binding * (thm list * attribute list) list
+                | CFG_BUNDLE of Bundle.name
+
+fun CONFIG' prep_attr_thms raw_thms (ctxt, SK) =
+  let val cfgs = prep_attr_thms ctxt raw_thms
+   in (fold (fn CFG_BUNDLE name => Bundle.includes [name]
+              | CFG_NOTE   note => snd o Proof_Context.note_thms "" note) cfgs ctxt, SK)
+  end
+
+val CONFIG = OPR o CONFIG' (K I)
+val CONFIG_CMD = Parse_Spec.name_facts >> (
+      OPR o CONFIG' (fn ctxt => fn facts =>
+    let fun parse_fact ((b,attrs), facts) =
+              ((b, map (Attrib.attribute_cmd ctxt) attrs),
+               map (apfst (Proof_Context.get_fact ctxt)
+                 #> apsnd (map (Attrib.attribute_cmd ctxt))) facts)
+        fun parse (origin as ((b,[]), [(Facts.Named (name,_), [])])) =
+              if Binding.is_empty b
+              then CFG_BUNDLE (Bundle.check ctxt name)
+              else CFG_NOTE (parse_fact origin)
+          | parse fact = CFG_NOTE (parse_fact fact)
+     in map parse facts
+    end ))
+
+(*** Toplevel ***)
 
 (* Interfaces *)
 
@@ -1654,7 +1594,8 @@ val CMDS = Symtab.make [
       ("CHOOSE",  CHOOSE_CMD),
       ("NOTATION",NOTATION_CMD),
       ("USE_THY", USE_THEORY_CMD),
-      ("DEFINE",  DEFINE_CMD)
+      ("DEFINE",  DEFINE_CMD),
+      ("CONFIG",  CONFIG_CMD)
     ]
 
 val keywords = let open Keyword
@@ -1712,7 +1653,8 @@ val keywords = let open Keyword
            (("CHOOSE",\<^here>), command_spec (prf_decl, [])),
            (("NOTATION",\<^here>), command_spec (prf_decl, [])),
            (("USE_THY",\<^here>), command_spec (prf_goal, [])),
-           (("DEFINE",\<^here>), command_spec (prf_decl, []))
+           (("DEFINE",\<^here>), command_spec (prf_decl, [])),
+           (("CONFIG",\<^here>), command_spec (prf_decl, []))
          ]
      end
 

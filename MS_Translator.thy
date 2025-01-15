@@ -4,10 +4,15 @@ begin
 
 ML_file \<open>library/translator.ML\<close>
 
+
+supply
+ML \<open>Token.make_string0 "\"aaa\""\<close>
+ML \<open>Token.make ((2,0), "a") Position.none\<close>
+
 ML \<open>let
  val kws = Thy_Header.get_keywords \<^theory>
   in Parse.read_embedded \<^context> kws
-        Method.parse (Input.string "(simp add: HOL.simps)")
+        Method.parse (Input.string "this")
  end\<close>
 
 ML \<open>
