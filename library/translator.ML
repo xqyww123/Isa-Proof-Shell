@@ -16,23 +16,28 @@ type structured_statement = var' list      (*vars*)
                           * statement      (*assumes*)
                           * attr_statement (*shows*)
 
+exception Parse_Fail of Token.src list
 exception Translation_Fail of string
 exception Unsupported of string
 
 datatype ast =
 (* Isar Specific *)
-    PROOF  of (Proof.context * ast) list
+    PROOF  of Method.text option * (Proof.context * ast) list
+  | QED    of Method.text option
   | BRCBLK of (Proof.context * ast) list
+  | ENDBLK
   | FIX    of var list
   | ASSUME of structured_statement
-  | THUS   of structured_statement
-  | HENCE  of structured_statement
-  | SHOW   of structured_statement
+  | THUS   of structured_statement * (Proof.context * ast) list
+  | HENCE  of structured_statement * (Proof.context * ast) list
+  | SHOW   of structured_statement * (Proof.context * ast) list
   | CASE   of Attrib.binding
             * (string * string option list)
-  | ISAR_OBTAIN   of (binding * (binding * string option * mixfix) list)
-                   * structured_statement
+  | ISAR_OBTAIN   of ( (binding * (binding * string option * mixfix) list)
+                     * structured_statement)
+                   * (Proof.context * ast) list
   | ISAR_CONSIDER of Element.obtains
+                   * (Proof.context * ast) list
   | USING  of fact list
   | DEFER  of int
   | PREFER of int
@@ -52,15 +57,14 @@ datatype ast =
   | END    of (*with*) Facts.ref list * (*without*) Facts.ref list
   | NEXT   of string list (*VARS*) *
               ((*with*) Facts.ref list * (*without*) Facts.ref list)
-  | HAVE     of structured_statement
+  | HAVE     of structured_statement * (Proof.context * ast) list
   | NOTATION of Syntax.mode * (string * mixfix) list
   | LET      of (string list * string) list
   | CONSIDER of var list * structured_statement
   | DEFINE   of var' list * attr_statement * var' list
-  | OPEN_MODULE of Expression.expression
+  | OPEN_MODULE of Expression.expression * (Proof.context * ast) list
 
-
-type eval_steps = (Proof.context * ast) list
+type ast' = (Proof.context * ast) list
 
 (** Helpers **)
 
@@ -71,7 +75,7 @@ fun mk_idt name = Token.make ((2,0), name) Position.none
 val facts = Parse.and_list1 Parse.thms1
 val VARS = Parse.vars >> map (fn (v,t,s) => (Binding.name_of v,t,s))
 
-fun structured_statement ctxt =
+fun structured_statement F ctxt =
   Parse_Spec.statement -- Parse_Spec.if_statement' -- Parse.for_fixes
     >> (fn ((shows, assumes), fixes) =>
     let val (stmt, ctxt') = Proof_Context.read_statement fixes assumes (map snd shows) ctxt
@@ -80,13 +84,23 @@ fun structured_statement ctxt =
      in (ctxt',
           (map2 (fn fix => fn (_,t,s) => (swap fix,t,s)) (#fixes stmt) fixes,
            map (map (apfst (read ctxt') #> apsnd (map (read ctxt'P)))) assumes,
-           map (apsnd (map (apfst (read ctxt') #> apsnd (map (read ctxt'P))))) shows))
+           map (apsnd (map (apfst (read ctxt') #> apsnd (map (read ctxt'P))))) shows)
+          |> F )
     end )
 
+exception IGNORE
+fun ignore _ _ = raise IGNORE
+
+fun TODO name _ _ = raise Unsupported name
+
+local
+
 fun tactic_parser ctxt = Method.parse >> (pair ctxt o TACTIC o fst)
+fun qed_parser ctxt = Scan.option (Method.parse >> fst) >> (pair ctxt o QED)
+fun proof_parser ctxt = Scan.option (Method.parse >> fst) >> (pair ctxt o QED)
 
 fun fix_parser ctxt = VARS >> (pair ctxt o FIX)
-fun assume_parser ctxt = structured_statement ctxt >> apsnd ASSUME
+val assume_parser = structured_statement ASSUME
 fun unfold_parser ctxt = facts >> (pair ctxt o UNFOLD o flat)
 fun using_parser  ctxt = facts >> (pair ctxt o USING  o flat)
 fun case_parser   ctxt = (
@@ -108,14 +122,16 @@ fun define_parser ctxt = (Parse.vars --| Parse.where_) -- Parse_Spec.statement -
          |> pair ctxt'
         end)
 
-exception IGNORE
-fun ignore _ _ = raise IGNORE
+fun config_parser ctxt = Parse_Spec.name_facts >> (pair ctxt o CONFIG)
+fun parser' p ctxt = p >> pair ctxt
 
-fun TODO name _ _ = raise Unsupported name
+in
 
 val initial_parsers = Symtab.make [
 
   ("apply",      tactic_parser),
+  ("proof",      proof_parser),
+  ("qed"  ,      qed_parser),
   ("apply_end",  tactic_parser),
   ("by",         tactic_parser),
   ("fix",        fix_parser),
@@ -124,37 +140,35 @@ val initial_parsers = Symtab.make [
   ("unfolding",  unfold_parser),
   ("using",      using_parser),
   ("case",       case_parser),
-  ("write",      (fn ctxt => Parse.syntax_mode -- Parse.and_list1 (Parse.const -- Parse.mixfix)
-                      >> (pair ctxt o NOTATION) )),
-  ("let",        (fn ctxt => Parse.and_list1 (Parse.and_list1 Parse.term -- (\<^keyword>\<open>=\<close> |-- Parse.term))
-                      >> (pair ctxt o LET) )),
+  ("write",      parser' (Parse.syntax_mode -- Parse.and_list1 (Parse.const -- Parse.mixfix)
+                      >> NOTATION) ),
+  ("let",        parser' (Parse.and_list1 (Parse.and_list1 Parse.term -- (\<^keyword>\<open>=\<close> |-- Parse.term))
+                      >> LET) ),
   ("define",     define_parser),
-  ("supply",     K (Parse_Spec.name_facts >> CONFIG)),
-  ("note",       K (Parse_Spec.name_facts >> CONFIG)),
-  ("include",    K (Parse_Spec.name_facts >> CONFIG)),
+  ("supply",     config_parser),
+  ("note",       config_parser),
+  ("include",    config_parser),
 
-  ("defer",      K (Scan.optional Parse.nat 1 >> DEFER)),
-  ("prefer",     K (Scan.optional Parse.nat 1 >> DEFER)),
-  ("with",       K (facts >> (WITH o flat))),
-  ("from",       K (facts >> (FROM o flat))),
-  ("then",       K (facts >> (ISAR_THEN o flat))),
+  ("defer",      parser' (Scan.optional Parse.nat 1 >> DEFER)),
+  ("prefer",     parser' (Scan.optional Parse.nat 1 >> DEFER)),
+  ("with",       parser' (facts >> (WITH o flat))),
+  ("from",       parser' (facts >> (FROM o flat))),
+  ("then",       parser' (facts >> (ISAR_THEN o flat))),
 
-  ("have",       (fn ctxt => structured_statement ctxt >> HAVE)),
-  ("show",       (fn ctxt => structured_statement ctxt >> SHOW)),
-  ("thus",       (fn ctxt => structured_statement ctxt >> THUS)),
-  ("hence",      (fn ctxt => structured_statement ctxt >> HENCE)),
+  ("have",       structured_statement (HAVE  o rpair [])),
+  ("show",       structured_statement (SHOW  o rpair [])),
+  ("thus",       structured_statement (THUS  o rpair [])),
+  ("hence",      structured_statement (HENCE o rpair [])),
 
-  ("interpret",  K (Parse.!!! Parse_Spec.locale_expression >> OPEN_MODULE)),
+  ("interpret",  parser' (Parse.!!! Parse_Spec.locale_expression >> (OPEN_MODULE o rpair []))),
 
-  ("next",       K (Scan.succeed (NEXT ([],([],[]))))),
-  ("done",       K (Scan.succeed (END ([],[])))),
-  (".",          K (Scan.succeed (END ([],[])))),
-  ("..",         K (Scan.succeed (END ([],[])))),
+  ("next",       parser' (Scan.succeed (NEXT ([],([],[]))))),
+  ("done",       parser' (Scan.succeed (END ([],[])))),
+  (".",          parser' (Scan.succeed (END ([],[])))),
+  ("..",         parser' (Scan.succeed (END ([],[])))),
 
-  ("{",          TODO "{"),
-  ("}",          TODO "}"),
-  ("proof",      TODO "proof"),
-  ("qed",        TODO "qed"),
+  ("{",          parser' (Scan.succeed (BRCBLK []))),
+  ("}",          parser' (Scan.succeed ENDBLK)),
   ("subgoal",    TODO "subgoal"),
 
   ("oops",       TODO "oops"),
@@ -202,19 +216,60 @@ val initial_parsers = Symtab.make [
   ("welcome",                  ignore)
 ]
 
+end
+
 datatype blk_behv = OPEN_BLK
 
-fun initial_pass toks s =
-  let fun parse s ret (src::srcs) =
+val initial_pass : Toplevel.state * Token.src list -> ast' =
+  let fun chk_end (ret, []) = ret
+        | chk_end (ret, [eof]) =
+            if Token.is_eof eof then ret else raise Parse_Fail [[eof]]
+        | chk_end (_, src) = raise Parse_Fail [src]
+
+      fun parse (_, []) = raise Parse_Fail []
+        | parse (s, src::srcs) =
         let val (name,_) = Token.name_of_src src
             val parser = case Symtab.lookup initial_parsers name
                            of SOME parser => parser
                             | NONE => raise Unsupported name
             val tr = Outer_Syntax.parse_span (Toplevel.theory_of s) (fn _ => error "BUG") src
             val s' = Toplevel.command_exception false tr s
-         in parse s' (parser (Toplevel.context_of s) (tl src) :: ret) srcs
+
+            fun BLK F =
+              let val (ast, s_srcs'') = parse (s', srcs)
+               in parse s_srcs'' |> apfst (fn L => F ast :: L)
+              end
+
+         in case chk_end (parser (Toplevel.context_of s) (tl src))
+         of ast as (_, END _) => ([ast], (s', srcs))
+          | ast as (_, QED _) => ([ast], (s', srcs))
+          | ast as (_, ENDBLK) => ([ast], (s', srcs))
+          | (ctxt, HAVE  (smt, _)) => BLK (fn ast => (ctxt, HAVE  (smt, ast)))
+          | (ctxt, THUS  (smt, _)) => BLK (fn ast => (ctxt, THUS  (smt, ast)))
+          | (ctxt, HENCE (smt, _)) => BLK (fn ast => (ctxt, HENCE (smt, ast)))
+          | (ctxt, SHOW  (smt, _)) => BLK (fn ast => (ctxt, SHOW  (smt, ast)))
+          | (ctxt, OPEN_MODULE (expr, _)) => BLK (fn ast => (ctxt, OPEN_MODULE (expr, ast)))
+          | (ctxt, PROOF (txt, _)) =>
+              let val (ast, s_srcs'') = parse (s', srcs)
+                  fun chk [] = error "proof is not ended by `qed`"
+                    | chk [(_, QED _)] = ()
+                    | chk _ = error "proof is not ended by `qed`"
+               in chk ast
+                ; ([(ctxt, PROOF (txt, ast))], s_srcs'')
+              end
+          | (ctxt, BRCBLK _) =>
+              BLK (fn ast =>
+                let fun chk [] = error "`{` is not ended by `}`"
+                      | chk [(_, ENDBLK)] = ()
+                      | chk _  = error "`{` is not ended by `}`"
+                 in chk ast
+                  ; (ctxt, BRCBLK ast)
+                end)
+          | other => parse (s', srcs) |> apfst (fn L => other :: L)
         end
-   in toks
+   in parse
+   #> (fn (ret, (_, [])) => ret
+        | (_, (_, toks)) => raise Parse_Fail toks)
   end
 
 end
